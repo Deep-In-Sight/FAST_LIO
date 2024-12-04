@@ -723,17 +723,25 @@ void generateColorMap(sensor_msgs::msg::Image::SharedPtr msg_rgb,
     // Process each point
     for (size_t i = 0; i < pc->points.size(); ++i) {
         Eigen::Vector3d point_pc = {pc->points[i].x, pc->points[i].y, pc->points[i].z};
+        Eigen::Vector3d point_camera = Rcl * point_pc + tcl;
+
         RCLCPP_INFO(rclcpp::get_logger("generateColorMap"), 
                     "Processing point %lu: LiDAR (%.2f, %.2f, %.2f)", i, point_pc.x(), point_pc.y(), point_pc.z());
 
-        Eigen::Vector3d point_camera = Rcl * point_pc + tcl;
+
+        RCLCPP_INFO(
+            rclcpp::get_logger("generateColorMap"),
+            "Transformed point to camera: (%f, %f, %f)", 
+            point_camera.x(), point_camera.y(), point_camera.z()
+        );
+
 
         if (!std::isfinite(point_camera.z()) || point_camera.z() <= 0) {
             RCLCPP_WARN(rclcpp::get_logger("generateColorMap"), "Point %lu is behind the camera or invalid (z=%.2f)", i, point_camera.z());
             continue;
         }
 
-        Eigen::Vector2d point_2d = point_camera.head<2>() / point_camera.z();
+        Eigen::Vector2d point_2d(point_camera.x() / point_camera.z(), point_camera.y() / point_camera.z());
         int u = static_cast<int>(K_camera[0] * point_2d.x() + K_camera[2]);
         int v = static_cast<int>(K_camera[4] * point_2d.y() + K_camera[5]);
 
@@ -1346,6 +1354,9 @@ public:
             sub_pcl_pc_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(lid_topic, rclcpp::SensorDataQoS(), standard_pcl_cbk);
         }
         sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic, rclcpp::SensorDataQoS().keep_all(), imu_cbk);
+
+
+
         sub_image_0 = this->create_subscription<sensor_msgs::msg::CompressedImage>(
     camera_topic0, rclcpp::QoS(10), [](const sensor_msgs::msg::CompressedImage::SharedPtr msg) {
         camera_cbk(msg, Measures.image0);
@@ -1358,6 +1369,9 @@ public:
     camera_topic2, rclcpp::QoS(10), [](const sensor_msgs::msg::CompressedImage::SharedPtr msg) {
         camera_cbk(msg, Measures.image2);
     });
+
+
+    
 
         pubLaserCloudFull_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered", 20);
         pubLaserCloudFull_body_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered_body", 20);
@@ -1586,54 +1600,38 @@ private:
                 RCLCPP_INFO(this->get_logger(), "Generating color map...");
                 RCLCPP_INFO(rclcpp::get_logger("laser_mapping"), "feats_undistort size: %lu", feats_undistort->points.size());
                 
+                pcl::PointCloud<pcl::PointXYZRGB>::Ptr combined_pc_color(new pcl::PointCloud<pcl::PointXYZRGB>());
+
                 
-                generateColorMap(Measures.image0, state_camera0, state_lidar, feats_down_body, pc_color0, K_camera0, D_camera0); 
-                generateColorMap(Measures.image1, state_camera1, state_lidar, feats_down_body, pc_color1, K_camera1, D_camera2);
-                generateColorMap(Measures.image2, state_camera2, state_lidar, feats_down_body, pc_color2, K_camera2, D_camera2);
-                
+                generateColorMap(Measures.image0, state_camera0, state_lidar, feats_down_body, pc_color0, K_camera0, D_camera0);
                 pcl::transformPointCloud(*pc_color0, *pc_color0, state_lidar.matrix());
+                *combined_pc_color += *pc_color0;
+
+                generateColorMap(Measures.image1, state_camera1, state_lidar, feats_down_body, pc_color1, K_camera1, D_camera1);
                 pcl::transformPointCloud(*pc_color1, *pc_color1, state_lidar.matrix());
+                *combined_pc_color += *pc_color1;
+
+                generateColorMap(Measures.image2, state_camera2, state_lidar, feats_down_body, pc_color2, K_camera2, D_camera2);
                 pcl::transformPointCloud(*pc_color2, *pc_color2, state_lidar.matrix());
+                *combined_pc_color += *pc_color2;
 
-                sensor_msgs::msg::PointCloud2 color_msg0;
-                sensor_msgs::msg::PointCloud2 color_msg1;
-                sensor_msgs::msg::PointCloud2 color_msg2;
-                pcl::toROSMsg(*pc_color0, color_msg0);
-                pcl::toROSMsg(*pc_color1, color_msg1);
-                pcl::toROSMsg(*pc_color2, color_msg2);
+                sensor_msgs::msg::PointCloud2 output_msg;
+                pcl::toROSMsg(*combined_pc_color, output_msg);
+                //output_msg.header.stamp = rclcpp::Clock().now(); // Ensure timestamp consistency
+                output_msg.header.frame_id = "camera_init"; // Adjust frame as needed
 
-                color_msg0.header.frame_id = "camera_init";
-                color_msg1.header.frame_id = "camera_init"; 
-                color_msg2.header.frame_id = "camera_init";
 
                 if (!camera_time_buffer.empty()) {
-                    color_msg0.header.stamp = get_ros_time(camera_time_buffer.front());
-                    pubColorMap_->publish(color_msg0);
-                    RCLCPP_INFO(this->get_logger(), "Published colorized point cloud with %lu points.", pc_color0->points.size());
+                    output_msg.header.stamp = get_ros_time(camera_time_buffer.front());
+                    pubColorMap_->publish(output_msg);
+                    RCLCPP_INFO(this->get_logger(), "Published colorized point cloud with %lu points.", combined_pc_color->points.size());
                 } 
                 else {
                     RCLCPP_ERROR(this->get_logger(), "camera_time_buffer is empty. Skipping publish.");
                     camera_pushed = false;
                 }
 
-                 if (!camera_time_buffer.empty()) {
-                    color_msg1.header.stamp = get_ros_time(camera_time_buffer.front());
-                    pubColorMap_->publish(color_msg1);
-                    RCLCPP_INFO(this->get_logger(), "Published colorized point cloud with %lu points.", pc_color1->points.size());
-                } 
-                else {
-                    RCLCPP_ERROR(this->get_logger(), "camera_time_buffer is empty. Skipping publish.");
-                    camera_pushed = false;
-                }
-                 if (!camera_time_buffer.empty()) {
-                    color_msg2.header.stamp = get_ros_time(camera_time_buffer.front());
-                    pubColorMap_->publish(color_msg2);
-                    RCLCPP_INFO(this->get_logger(), "Published colorized point cloud with %lu points.", pc_color2->points.size());
-                } 
-                else {
-                    RCLCPP_ERROR(this->get_logger(), "camera_time_buffer is empty. Skipping publish.");
-                    camera_pushed = false;
-                }
+                 
 
                 
             } 
