@@ -91,7 +91,7 @@ add_executable(fastlio_color
   src/laserMapping.cpp
   include/ikd-Tree/ikd_Tree.cpp
   src/preprocess.cpp
-  src/LensDistortionCorrection.cpp
+  # src/LensDistortionCorrection.cpp
 )
 
 # OpenMP support
