@@ -12,24 +12,45 @@
         common:
             lid_topic:  "/lidar"
             imu_topic:  "/imu/data"
-            camera_topic: "/camera_0_CompressedImage"
-            #camera_topic1: "/camera_1_CompressedImage"
-            #camera_topic2: "/camera_2_CompressedImage"
+            camera_topic0: "/camera_0_CompressedImage"
+            camera_topic1: "/camera_1_CompressedImage"
+            camera_topic2: "/camera_2_CompressedImage"
             time_sync_en: false         # Time synchronization should remain off if not available.
             time_offset_lidar_to_imu: 0.0 # Based on the assumption in your JSON file.
-
-        color_mapping:
+        color_mapping0:
             K_camera: [960.0, 0.0, 960.0,
-                       0.0, 960.0, 600.0,
-                       0.0, 0.0, 1.0]
+                    0.0, 960.0, 600.0,
+                    0.0, 0.0, 1.0]
             D_camera: [0.0, 0.0, 0.0, 0.0, 0.0]
             time_offset_lidar_to_camera: 0.0
-            extrinsic_T: [0.05, 0.0, -0.05]
+            extrinsic_T: [0.05, 0.0, -0.1]
             extrinsic_R: [ 0.0,  0.0,  1.0,
-                          -1.0,  0.0,  0.0,
-                           0.0, -1.0,  0.0 ]
+                        -1.0,  0.0,  0.0,
+                        0.0, -1.0,  0.0 ]
 
+        color_mapping1:
+            K_camera: [960.0, 0.0, 960.0,
+                    0.0, 960.0, 600.0,
+                    0.0, 0.0, 1.0]
+            D_camera: [0.0, 0.0, 0.0, 0.0, 0.0]
+            time_offset_lidar_to_camera: 0.0
+            extrinsic_T: [0.0, 0.05, -0.1]
+            extrinsic_R: [ 1.0,  0.0,  0.0,
+                        0.0,  1.0,  0.0,
+                        0.0,  0.0,  1.0 ]
+
+        color_mapping2:
+            K_camera: [960.0, 0.0, 960.0,
+                    0.0, 960.0, 600.0,
+                    0.0, 0.0, 1.0]
+            D_camera: [0.0, 0.0, 0.0, 0.0, 0.0]
+            time_offset_lidar_to_camera: 0.0
+            extrinsic_T: [0.0, -0.05, -0.1]
+            extrinsic_R: [ 0.0,  0.0, -1.0,
+                        1.0,  0.0,  0.0,
+                        0.0,  1.0,  0.0 ]
         preprocess:
+               
             lidar_type: 3
             scan_line: 32
             timestamp_unit: 3
@@ -53,6 +74,7 @@
             scan_publish_en: true
             dense_publish_en: true
             scan_bodyframe_pub_en: true
+            color_publish_en: true
 
         pcd_save:
             pcd_save_en: true
