@@ -63,7 +63,9 @@ struct MeasureGroup     // Lidar data and imu dates for the curent process
     double lidar_end_time;
     PointCloudXYZI::Ptr lidar;
     deque<sensor_msgs::msg::Imu::ConstSharedPtr> imu;
-    sensor_msgs::msg::Image::SharedPtr image;
+    sensor_msgs::msg::Image::SharedPtr image0;
+    sensor_msgs::msg::Image::SharedPtr image1;
+    sensor_msgs::msg::Image::SharedPtr image2;
     double match_camera_time;
 };
 
