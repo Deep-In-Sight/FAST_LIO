@@ -19,12 +19,9 @@ private:
     0.9999892807161488
     };
 
-    double evaluatePolynomial(const double coeffs[], int degree, double x);
+    double evaluatePolynomial(const double coeffs[], double x,  int degree);
 public:
     std::pair<int, int> angleToPixel(double azimuth, double elevation);
-}
-
-class 
-
+};
 
 #endif // LENS_DISTORTION_CORRECTION_H

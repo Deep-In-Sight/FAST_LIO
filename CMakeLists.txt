@@ -68,12 +68,16 @@ find_package(PCL REQUIRED COMPONENTS common io)
 find_package(OpenCV REQUIRED)
 find_package(OpenMP REQUIRED)
 
+set(COLOR_MAPPING_DIRS
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/fast_lio_color_mapping"
+ ) 
 # Include directories
 include_directories(
   ${EIGEN3_INCLUDE_DIR}
   ${PCL_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS}
   ${Python3_INCLUDE_DIRS}
+  ${COLOR_MAPPING_DIRS}
 )
 
 # ROS 2 Message definitions
@@ -91,7 +95,7 @@ add_executable(fastlio_color
   src/laserMapping.cpp
   include/ikd-Tree/ikd_Tree.cpp
   src/preprocess.cpp
-  # src/LensDistortionCorrection.cpp
+  src/LensDistortionCorrection.cpp
 )
 
 # OpenMP support
