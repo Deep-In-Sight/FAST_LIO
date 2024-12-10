@@ -333,7 +333,7 @@ void lasermap_fov_segment()
 
 
 void camera_cbk(const std::shared_ptr<sensor_msgs::msg::CompressedImage> &msg,
-                sensor_msgs::msg::Image::SharedPtr &image_parameter)
+                sensor_msgs::msg::Image::SharedPtr &image_ptr)
 {
     // Decode the compressed image
     cv::Mat image = cv::imdecode(cv::Mat(msg->data), cv::IMREAD_COLOR); // Decompress
@@ -351,7 +351,7 @@ void camera_cbk(const std::shared_ptr<sensor_msgs::msg::CompressedImage> &msg,
     bridge_image_msg->header.stamp = rclcpp::Time(msg_time.seconds() + time_offset_lidar_camera);
 
     
-        std::lock_guard<std::mutex> lock(mtx_buffer);
+    std::lock_guard<std::mutex> lock(mtx_buffer);
 
     //  Clear the buffer if there is a significant timing issue
     // if (Measures.match_camera_time < last_timestamp_camera)
@@ -364,14 +364,14 @@ void camera_cbk(const std::shared_ptr<sensor_msgs::msg::CompressedImage> &msg,
     camera_buffer.clear();
     camera_time_buffer.clear();
 
-        // Update the parameter with the processed image
-        image_parameter = bridge_image_msg;
+    // Update the parameter with the processed image
+    image_ptr = bridge_image_msg;
 
-        // Update the measurement and buffer
-        Measures.match_camera_time = get_time_sec(image_parameter->header.stamp);
-        last_timestamp_camera = Measures.match_camera_time;
-        camera_buffer.push_back(image_parameter);
-        camera_time_buffer.push_back(Measures.match_camera_time);
+    // Update the measurement and buffer
+    Measures.match_camera_time = get_time_sec(image_ptr->header.stamp);
+    last_timestamp_camera = Measures.match_camera_time;
+    camera_buffer.push_back(image_ptr);
+    camera_time_buffer.push_back(Measures.match_camera_time);
     
 
     camera_count++;
