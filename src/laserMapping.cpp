@@ -155,8 +155,8 @@ V3D euler_cur;
 V3D position_last(Zero3d);
 V3D Lidar_T_wrt_IMU(Zero3d);
 M3D Lidar_R_wrt_IMU(Eye3d);
-std::array<V3D, cam_num> Camera_T_wrt_Lidar { V3D(Zero3d), V3D(Zero3d), V3D(Zero3d) }; // Camera_T_wrt_Lidar
-std::array<M3D, cam_num> Camera_R_wrt_Lidar { M3D(Eye3d), M3D(Eye3d), M3D(Eye3d) }; // Camera_R_wrt_Lidar
+std::array<V3D, cam_num> camera_t_wrt_Lidar { V3D(Zero3d), V3D(Zero3d), V3D(Zero3d) }; 
+std::array<M3D, cam_num> camera_r_wrt_Lidar { M3D(Eye3d), M3D(Eye3d), M3D(Eye3d) }; 
 
 
 /*** EKF inputs and output ***/
@@ -643,35 +643,34 @@ void map_incremental()
 
 PointCloudXYZI::Ptr pcl_wait_pub(new PointCloudXYZI());
 PointCloudXYZI::Ptr pcl_wait_save(new PointCloudXYZI());
-void generateColorMap(sensor_msgs::msg::Image::SharedPtr msg_rgb,  // TODO : modify to use multiple cameras
-                      Eigen::Affine3d &camera_state, 
-                      Eigen::Affine3d &lidar_state,
+pcl::PointCloud<pcl::PointXYZRGB>::Ptr generateColorMap(sensor_msgs::msg::Image::SharedPtr msg_rgb,  // TODO : modify to use multiple cameras
+                      Eigen::Affine3d T_c2l,
                       pcl::PointCloud<pcl::PointXYZINormal>::Ptr &pc,
-                      pcl::PointCloud<pcl::PointXYZRGB>::Ptr &pc_color,
                       const std::vector<double> &K_camera, 
                       const std::vector<double> &D_camera)
 {
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr result = std::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
+
     if (K_camera.size() != 9 || D_camera.size() != 5) {
         RCLCPP_ERROR(rclcpp::get_logger("generateColorMap"), "Invalid camera parameters");
-        return;
+        return result;
     }
-
     // Transform from LiDAR to Camera
-    Eigen::Affine3d T_cl = camera_state.inverse() * lidar_state;
-    Eigen::Matrix3d Rcl = T_cl.rotation();
-    Eigen::Vector3d tcl = T_cl.translation();
+    Eigen::Matrix3d r_c2l = T_c2l.rotation();
+    Eigen::Vector3d t_c2l = T_c2l.translation();
 
     // Convert ROS image to OpenCV format
-    cv::Mat rgb = cv_bridge::toCvCopy(*msg_rgb, "bgr8")->image;
-    if (rgb.empty()) {
+    cv::Mat img = cv_bridge::toCvCopy(*msg_rgb, "bgr8")->image;
+    if (img.empty()) {
         RCLCPP_ERROR(rclcpp::get_logger("generateColorMap"), "RGB image is empty");
-        return;
+        return result;
     }
 
     // Process each point
+
     for (size_t i = 0; i < pc->points.size(); ++i) {
         Eigen::Vector3d point_pc = {pc->points[i].x, pc->points[i].y, pc->points[i].z};
-        Eigen::Vector3d point_camera = Rcl * point_pc + tcl;
+        Eigen::Vector3d point_camera = r_c2l * point_pc + t_c2l;
 
         float degree = atan2(point_pc.x(), point_pc.y()) * 57.29579143;
         degree -= 90;
@@ -687,7 +686,7 @@ void generateColorMap(sensor_msgs::msg::Image::SharedPtr msg_rgb,  // TODO : mod
         int u = static_cast<int>(K_camera[0] * point_2d.x() + K_camera[2]);
         int v = static_cast<int>(K_camera[4] * point_2d.y() + K_camera[5]);
 
-        if (u < 0 || u >= rgb.cols || v < 0 || v >= rgb.rows) {
+        if (u < 0 || u >= img.cols || v < 0 || v >= img.rows) {
             // RCLCPP_WARN(rclcpp::get_logger("generateColorMap"), "Point %lu out of image bounds: (u=%d, v=%d)", i, u, v);
             continue;
         }
@@ -696,12 +695,12 @@ void generateColorMap(sensor_msgs::msg::Image::SharedPtr msg_rgb,  // TODO : mod
         point_rgb.x = point_pc.x();
         point_rgb.y = point_pc.y();
         point_rgb.z = point_pc.z();
-        point_rgb.b = rgb.at<cv::Vec3b>(v, u)[0];
-        point_rgb.g = rgb.at<cv::Vec3b>(v, u)[1];
-        point_rgb.r = rgb.at<cv::Vec3b>(v, u)[2];
-        pc_color->push_back(point_rgb);
-
+        point_rgb.b = img.at<cv::Vec3b>(v, u)[0];
+        point_rgb.g = img.at<cv::Vec3b>(v, u)[1];
+        point_rgb.r = img.at<cv::Vec3b>(v, u)[2];
+        result->push_back(point_rgb);
     }
+    return result;
 }
 
 void publish_frame_world(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudFull)
@@ -1055,17 +1054,19 @@ public:
         std::array<std::shared_ptr<CameraProcess>, cam_num> p_cams;
         std::array<Eigen::Matrix3d, cam_num> eigen_Ks;
         std::array<Eigen::VectorXd, cam_num> eigen_Ds;
-        
+
         for (size_t i = 0; i < cam_num; ++i) {
             // Extrinsic parameters
-            Camera_T_wrt_Lidar[i] << VEC_FROM_ARRAY(extrinsic_t_l2c[i]);
-            Camera_R_wrt_Lidar[i] << MAT_FROM_ARRAY(extrinsic_r_l2c[i]);
-            T_L2Cs[i].translation() = Camera_T_wrt_Lidar[i];
-            T_L2Cs[i].linear() = Camera_R_wrt_Lidar[i];
+            
+
+            camera_t_wrt_Lidar[i] << VEC_FROM_ARRAY(extrinsic_t_l2c[i]);
+            camera_r_wrt_Lidar[i] << MAT_FROM_ARRAY(extrinsic_r_l2c[i]);
+            T_L2Cs[i].translation() = camera_t_wrt_Lidar[i];
+            T_L2Cs[i].linear() = camera_r_wrt_Lidar[i];
 
             // Initialize CameraProcess and set extrinsics
             p_cams[i] = std::make_shared<CameraProcess>();
-            p_cams[i]->set_extrinsic(Camera_T_wrt_Lidar[i], Camera_R_wrt_Lidar[i]);
+            p_cams[i]->set_extrinsic(camera_t_wrt_Lidar[i], camera_r_wrt_Lidar[i]);
 
             // Intrinsic parameters
             if (K_cameras[i].size() == 9) {
@@ -1084,8 +1085,8 @@ public:
         }
 
         // IMU extrinsic and covariance settings
-        T_IL.translation() = Lidar_T_wrt_IMU;
-        T_IL.linear() = Lidar_R_wrt_IMU;
+        T_I2L.translation() = Lidar_T_wrt_IMU;
+        T_I2L.linear() = Lidar_R_wrt_IMU;
         p_imu->set_extrinsic(Lidar_T_wrt_IMU, Lidar_R_wrt_IMU);
         p_imu->set_gyr_cov(V3D(gyr_cov, gyr_cov, gyr_cov));
         p_imu->set_acc_cov(V3D(acc_cov, acc_cov, acc_cov));
@@ -1124,22 +1125,12 @@ public:
         sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic, rclcpp::SensorDataQoS().keep_all(), imu_cbk);
 
 
-
-        sub_image_0 = this->create_subscription<sensor_msgs::msg::CompressedImage>( // TODO : modify
-        camera_topics[0], rclcpp::QoS(10), [this](const sensor_msgs::msg::CompressedImage::SharedPtr msg) {
-            camera_cbk(msg, Measures.images[0]);
-        });
-        sub_image_1 = this->create_subscription<sensor_msgs::msg::CompressedImage>( // TODO : modify
-        camera_topics[1], rclcpp::QoS(10), [this](const sensor_msgs::msg::CompressedImage::SharedPtr msg) {
-            camera_cbk(msg, Measures.images[1]);
-        });
-        sub_image_2 = this->create_subscription<sensor_msgs::msg::CompressedImage>( // TODO : modify
-        camera_topics[2], rclcpp::QoS(10), [this](const sensor_msgs::msg::CompressedImage::SharedPtr msg) {
-            camera_cbk(msg, Measures.images[2]);
-        });
-
-
-    
+        for(int i=0; i < cam_num; i++){
+            sub_images[i] = this->create_subscription<sensor_msgs::msg::CompressedImage>(
+                camera_topics[i], rclcpp::QoS(10), [this, i](const sensor_msgs::msg::CompressedImage::SharedPtr msg) {
+                    camera_cbk(msg, Measures.images[i]);
+                });
+        }
 
         pubLaserCloudFull_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered", 20);
         pubLaserCloudFull_body_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered_body", 20);
@@ -1158,8 +1149,6 @@ public:
         map_pub_timer_ = rclcpp::create_timer(this, this->get_clock(), map_period_ms, std::bind(&LaserMappingNode::map_publish_callback, this));
 
         map_save_srv_ = this->create_service<std_srvs::srv::Trigger>("map_save", std::bind(&LaserMappingNode::map_save_callback, this, std::placeholders::_1, std::placeholders::_2));
-
-        // RCLCPP_INFO(this->get_logger(), "Node init finished.");
     }
 
     ~LaserMappingNode()
@@ -1261,24 +1250,24 @@ private:
         this->get_parameter_or<double>("color_mapping.time_offset_lidar_to_camera", time_offset_lidar_cameras, 0.0);
         
         for (size_t i = 0; i < camera_number; ++i) {
-        std::string index_str = std::to_string(i);
+            std::string index_str = std::to_string(i);
 
-        this->declare_parameter<std::string>("common.camera_topic" + index_str, "/camera_" + index_str + "_CompressedImage");
-        this->declare_parameter<std::vector<double>>("color_mapping" + index_str + ".extrinsic_T", std::vector<double>());
-        this->declare_parameter<std::vector<double>>("color_mapping" + index_str + ".extrinsic_R", std::vector<double>());
-        this->declare_parameter<std::vector<double>>("color_mapping" + index_str + ".D_camera", std::vector<double>());
-        this->declare_parameter<std::vector<double>>("color_mapping" + index_str + ".K_camera", std::vector<double>());
+            this->declare_parameter<std::string>("common.camera_topic" + index_str, "/camera_" + index_str + "_CompressedImage");
+            this->declare_parameter<std::vector<double>>("color_mapping" + index_str + ".extrinsic_T", std::vector<double>());
+            this->declare_parameter<std::vector<double>>("color_mapping" + index_str + ".extrinsic_R", std::vector<double>());
+            this->declare_parameter<std::vector<double>>("color_mapping" + index_str + ".D_camera", std::vector<double>());
+            this->declare_parameter<std::vector<double>>("color_mapping" + index_str + ".K_camera", std::vector<double>());
 
-        this->get_parameter_or<std::vector<double>>(
-            "color_mapping" + index_str + ".extrinsic_T", extrinsic_t_l2c[i], std::vector<double>());
-        this->get_parameter_or<std::vector<double>>(
-            "color_mapping" + index_str + ".extrinsic_R", extrinsic_r_l2c[i], std::vector<double>());
-        this->get_parameter_or<std::vector<double>>(
-            "color_mapping" + index_str + ".K_camera", K_cameras[i], std::vector<double>());
-        this->get_parameter_or<std::vector<double>>(
-            "color_mapping" + index_str + ".D_camera", D_cameras[i], std::vector<double>());
-        this->get_parameter_or<std::string>(
-            "common.camera_topic" + index_str, camera_topics[i], "/camera_" + index_str + "_CompressedImage");
+            this->get_parameter_or<std::vector<double>>(
+                "color_mapping" + index_str + ".extrinsic_T", extrinsic_t_l2c[i], std::vector<double>());
+            this->get_parameter_or<std::vector<double>>(
+                "color_mapping" + index_str + ".extrinsic_R", extrinsic_r_l2c[i], std::vector<double>());
+            this->get_parameter_or<std::vector<double>>(
+                "color_mapping" + index_str + ".K_camera", K_cameras[i], std::vector<double>());
+            this->get_parameter_or<std::vector<double>>(
+                "color_mapping" + index_str + ".D_camera", D_cameras[i], std::vector<double>());
+            this->get_parameter_or<std::string>(
+                "common.camera_topic" + index_str, camera_topics[i], "/camera_" + index_str + "_CompressedImage");
         }
     }
 
@@ -1405,84 +1394,49 @@ private:
             t5 = omp_get_wtime();
             
             /******* color mapping *******/
-                // RCLCPP_INFO(this->get_logger(), "camera_pushed is true. Processing color mapping...");
+            state_ikfom cameratime_state = kf.get_x();
 
-                if (!Measures.images[0]) { // TODO : modify
-                    // RCLCPP_ERROR(this->get_logger(), "Measures.image is nullptr. Skipping color mapping.");
-                    return;
-                } else if (Measures.images[0]->data.empty()) { // TODO : modify
-                    // RCLCPP_ERROR(this->get_logger(), "Measures.image->data is empty. Skipping color mapping.");
-                    return;
+            Eigen::Affine3d state_imu_camera_time = Eigen::Affine3d::Identity();
+            state_imu_camera_time.translate(Eigen::Vector3d(cameratime_state.pos));
+            state_imu_camera_time.rotate(Eigen::Quaterniond(cameratime_state.rot));
+
+            std::array<Eigen::Affine3d, 3> state_cameras;
+            for(int i = 0; i < 3; i++){
+                state_cameras[i] = state_imu_camera_time * T_I2L * T_L2Cs[i];
+            }
+
+            Eigen::Affine3d state_imu = Eigen::Affine3d::Identity();
+            state_imu.translate(Eigen::Vector3d(kf.get_x().pos));
+            state_imu.rotate(Eigen::Quaterniond(kf.get_x().rot));
+            Eigen::Affine3d state_lidar = state_imu * T_I2L;
+
+            pcl::PointCloud<pcl::PointXYZRGB>::Ptr color_pointcloud(new pcl::PointCloud<pcl::PointXYZRGB>());
+
+            for(int i = 0; i < cam_num; i++){
+                if(Measures.images[i] != nullptr && Measures.images[i]->data.empty() == false){
+                    pcl::PointCloud<pcl::PointXYZRGB>::Ptr single_cam_pointcloud = std::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
+
+                    Eigen::Affine3d T_c2l = state_cameras[i].inverse() * state_lidar;
+                    single_cam_pointcloud = generateColorMap(Measures.images[i], T_c2l, feats_down_body, K_cameras[i], D_cameras[i]);
+                    pcl::transformPointCloud(*single_cam_pointcloud, *single_cam_pointcloud, state_lidar.matrix());
+                    *color_pointcloud += *single_cam_pointcloud;
                 }
-                if (!Measures.images[1]) { // TODO : modify
-                    // RCLCPP_ERROR(this->get_logger(), "Measures.image is nullptr. Skipping color mapping.");
-                    return;
-                } else if (Measures.images[1]->data.empty()) { // TODO : modify
-                    // RCLCPP_ERROR(this->get_logger(), "Measures.image->data is empty. Skipping color mapping.");
-                    return;
-                }
-                if (!Measures.images[2]) { // TODO : modify
-                    // RCLCPP_ERROR(this->get_logger(), "Measures.image is nullptr. Skipping color mapping.");
-                    return;
-                } else if (Measures.images[2]->data.empty()) { // TODO : modify
-                    // RCLCPP_ERROR(this->get_logger(), "Measures.image->data is empty. Skipping color mapping.");
-                    return;
-                }
+            }
 
-                pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc_color0(new pcl::PointCloud<pcl::PointXYZRGB>); // TODO : modify
-                pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc_color1(new pcl::PointCloud<pcl::PointXYZRGB>); // TODO : modify
-                pcl::PointCloud<pcl::PointXYZRGB>::Ptr pc_color2(new pcl::PointCloud<pcl::PointXYZRGB>); // TODO : modify
-
-                state_ikfom cameratime_state = kf.get_x();
+            sensor_msgs::msg::PointCloud2 output_msg;
+            pcl::toROSMsg(*color_pointcloud, output_msg);
+            //output_msg.header.stamp = rclcpp::Clock().now(); // Ensure timestamp consistency
+            output_msg.header.frame_id = "camera_init"; // Adjust frame as needed
 
 
-                Eigen::Affine3d state_imu_camera_time = Eigen::Affine3d::Identity();
-                state_imu_camera_time.translate(Eigen::Vector3d(cameratime_state.pos));
-                state_imu_camera_time.rotate(Eigen::Quaterniond(cameratime_state.rot));
-
-
-                std::array<Eigen::Affine3d, 3> state_cameras;
-                for(int i = 0; i < 3; i++){
-                    state_cameras[i] = state_imu_camera_time * T_IL * T_L2Cs[i];
-                }
-
-                Eigen::Affine3d state_imu = Eigen::Affine3d::Identity();
-                state_imu.translate(Eigen::Vector3d(kf.get_x().pos));
-                state_imu.rotate(Eigen::Quaterniond(kf.get_x().rot));
-                Eigen::Affine3d state_lidar = state_imu * T_IL;
-
-                
-                pcl::PointCloud<pcl::PointXYZRGB>::Ptr combined_pc_color(new pcl::PointCloud<pcl::PointXYZRGB>());
-
-                
-                generateColorMap(Measures.images[0], state_cameras[0], state_lidar, feats_down_body, pc_color0, K_cameras[0], D_cameras[0]); // TODO : modify
-                pcl::transformPointCloud(*pc_color0, *pc_color0, state_lidar.matrix());
-                *combined_pc_color += *pc_color0;
-
-                generateColorMap(Measures.images[1], state_cameras[1], state_lidar, feats_down_body, pc_color1, K_cameras[1], D_cameras[1]); // TODO : modify
-                pcl::transformPointCloud(*pc_color1, *pc_color1, state_lidar.matrix());
-                *combined_pc_color += *pc_color1;
-
-                generateColorMap(Measures.images[2], state_cameras[2], state_lidar, feats_down_body, pc_color2, K_cameras[2], D_cameras[2]); // TODO : modify
-                pcl::transformPointCloud(*pc_color2, *pc_color2, state_lidar.matrix());
-                *combined_pc_color += *pc_color2;
-
-                sensor_msgs::msg::PointCloud2 output_msg;
-                pcl::toROSMsg(*combined_pc_color, output_msg);
-                //output_msg.header.stamp = rclcpp::Clock().now(); // Ensure timestamp consistency
-                output_msg.header.frame_id = "camera_init"; // Adjust frame as needed
-
-
-                if (!camera_time_buffers[0].empty()) { // TODO : need for sync_packages
-                    output_msg.header.stamp = get_ros_time(camera_time_buffers[0].front()); // TODO : need for sync_packages
-                    pubColorMap_->publish(output_msg);
-                    // RCLCPP_INFO(this->get_logger(), "Published colorized point cloud with %lu points.", combined_pc_color->points.size());
-                } 
-                else {
-                    RCLCPP_ERROR(this->get_logger(), "camera_time_buffer is empty. Skipping publish.");
-                }
-
-                 
+            if (!camera_time_buffers[0].empty()) { // TODO : need for sync_packages
+                output_msg.header.stamp = get_ros_time(camera_time_buffers[0].front()); // TODO : need for sync_packages
+                pubColorMap_->publish(output_msg);
+                // RCLCPP_INFO(this->get_logger(), "Published colorized point cloud with %lu points.", combined_pc_color->points.size());
+            } 
+            else {
+                RCLCPP_ERROR(this->get_logger(), "camera_time_buffer is empty. Skipping publish.");
+            }
 
                 
             state_point_last = kf.get_x();
@@ -1550,7 +1504,7 @@ private:
     }
 
 private:
-    Eigen::Affine3d T_IL;
+    Eigen::Affine3d T_I2L;
     std::array<Eigen::Affine3d, 3> T_L2Cs;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudFull_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudFull_body_;
@@ -1560,9 +1514,7 @@ private:
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pubOdomAftMapped_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubPath_;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu_;
-    rclcpp::Subscription<sensor_msgs::msg::CompressedImage>::SharedPtr sub_image_0; // TODO : into container
-    rclcpp::Subscription<sensor_msgs::msg::CompressedImage>::SharedPtr sub_image_1; // TODO : into container
-    rclcpp::Subscription<sensor_msgs::msg::CompressedImage>::SharedPtr sub_image_2; // TODO : into container
+    std::array<rclcpp::Subscription<sensor_msgs::msg::CompressedImage>::SharedPtr, cam_num> sub_images;
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_pcl_pc_;
 #ifdef USE_LIVOX
     rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr sub_pcl_livox_;
