@@ -9,6 +9,7 @@
 #include <sensor_msgs/msg/imu.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <sensor_msgs/msg/image.hpp>
+#include <array>
 
 
 using namespace std;
@@ -41,6 +42,7 @@ typedef Vector3d V3D;
 typedef Matrix3d M3D;
 typedef Vector3f V3F;
 typedef Matrix3f M3F;
+constexpr int cam_num = 3;
 
 #define MD(a,b)  Matrix<double, (a), (b)>
 #define VD(a)    Matrix<double, (a), 1>
@@ -63,9 +65,7 @@ struct MeasureGroup     // Lidar data and imu dates for the curent process
     double lidar_end_time;
     PointCloudXYZI::Ptr lidar;
     deque<sensor_msgs::msg::Imu::ConstSharedPtr> imu;
-    sensor_msgs::msg::Image::SharedPtr image0;
-    sensor_msgs::msg::Image::SharedPtr image1;
-    sensor_msgs::msg::Image::SharedPtr image2;
+    std::array<sensor_msgs::msg::Image::SharedPtr, cam_num> images;
     double match_camera_time;
 };
 

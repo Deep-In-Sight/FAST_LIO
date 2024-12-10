@@ -97,20 +97,20 @@ mutex mtx_buffer;
 condition_variable sig_buffer;
 
 string root_dir = ROOT_DIR;
-string map_file_path, lid_topic, imu_topic, camera_topic0, camera_topic1, camera_topic2;
+string map_file_path, lid_topic, imu_topic;
+std::array<std::string, cam_num> camera_topics;
 
 double res_mean_last = 0.05, total_residual = 0.0;
 double last_timestamp_lidar = 0, last_timestamp_imu = -1.0, last_timestamp_camera = -1.0;
 double gyr_cov = 0.1, acc_cov = 0.1, b_gyr_cov = 0.0001, b_acc_cov = 0.0001;
 double filter_size_corner_min = 0, filter_size_surf_min = 0, filter_size_map_min = 0, fov_deg = 0;
-double cube_len = 0, HALF_FOV_COS = 0, FOV_DEG = 0, total_distance = 0, lidar_end_time = 0, first_lidar_time = 0.0, camera_end_time = 0.0;
-int    effct_feat_num = 0, time_log_counter = 0, scan_count = 0, publish_count = 0, camera_count = 0;
+double cube_len = 0, HALF_FOV_COS = 0, FOV_DEG = 0, total_distance = 0, lidar_end_time = 0, first_lidar_time = 0.0;
+int    effct_feat_num = 0, time_log_counter = 0, scan_count = 0, publish_count = 0;
 int    iterCount = 0, feats_down_size = 0, NUM_MAX_ITERATIONS = 0, laserCloudValidNum = 0, pcd_save_interval = -1, pcd_index = 0;
 bool   point_selected_surf[100000] = {0};
 bool   lidar_pushed, flg_first_scan = true, flg_exit = false, flg_EKF_inited;
 bool   scan_pub_en = false, dense_pub_en = false, scan_body_pub_en = false;
 bool    is_first_lidar = true;
-bool camera_pushed = true;
 
 vector<vector<int>>  pointSearchInd_surf; 
 vector<BoxPointType> cub_needrm;
@@ -121,25 +121,26 @@ vector<double>       extrinR(9, 0.0);
 deque<double>                     time_buffer;
 deque<PointCloudXYZI::Ptr>        lidar_buffer;
 deque<sensor_msgs::msg::Imu::ConstSharedPtr> imu_buffer;
-deque<sensor_msgs::msg::Image::SharedPtr> camera_buffer;
-deque<double> camera_time_buffer;
+// std::array<deque<sensor_msgs::msg::Image::SharedPtr>, cam_num> camera_buffers; // TODO : need for sync_packages
+std::array<deque<double>, cam_num> camera_time_buffers;
 
 
 
 //color
-vector<double>       extrinT_lc0(3, 0.0);
-vector<double>       extrinR_lc0(9, 0.0);
-vector<double>       extrinT_lc1(3, 0.0);
-vector<double>       extrinR_lc1(9, 0.0);
-vector<double>       extrinT_lc2(3, 0.0);
-vector<double>       extrinR_lc2(9, 0.0);
+int camera_number = 0;
+vector<double>       extrinT_lc0(3, 0.0); // TODO : into camera container
+vector<double>       extrinR_lc0(9, 0.0); // TODO : into camera container
+vector<double>       extrinT_lc1(3, 0.0); // TODO : into camera container
+vector<double>       extrinR_lc1(9, 0.0); // TODO : into camera container
+vector<double>       extrinT_lc2(3, 0.0); // TODO : into camera container
+vector<double>       extrinR_lc2(9, 0.0); // TODO : into camera container
 
-vector<double>       K_camera0(9, 0.0);
-vector<double>       D_camera0(5, 0.0);
-vector<double>       K_camera1(9, 0.0);
-vector<double>       D_camera1(5, 0.0);
-vector<double>       K_camera2(9, 0.0);
-vector<double>       D_camera2(5, 0.0);
+vector<double>       K_camera0(9, 0.0); // TODO : into camera container
+vector<double>       D_camera0(5, 0.0); // TODO : into camera container
+vector<double>       K_camera1(9, 0.0); // TODO : into camera container
+vector<double>       D_camera1(5, 0.0); // TODO : into camera container
+vector<double>       K_camera2(9, 0.0); // TODO : into camera container
+vector<double>       D_camera2(5, 0.0); // TODO : into camera container
 
 double               time_offset_lidar_camera = 0.0;
 
@@ -164,12 +165,12 @@ V3D position_last(Zero3d);
 V3D Lidar_T_wrt_IMU(Zero3d);
 M3D Lidar_R_wrt_IMU(Eye3d);
 //color
-V3D Camera_T_wrt_Lidar0(Zero3d);
-M3D Camera_R_wrt_Lidar0(Eye3d);
-V3D Camera_T_wrt_Lidar1(Zero3d);
-M3D Camera_R_wrt_Lidar1(Eye3d);
-V3D Camera_T_wrt_Lidar2(Zero3d);
-M3D Camera_R_wrt_Lidar2(Eye3d);
+V3D Camera_T_wrt_Lidar0(Zero3d); // TODO : into camera container
+M3D Camera_R_wrt_Lidar0(Eye3d); // TODO : into camera container
+V3D Camera_T_wrt_Lidar1(Zero3d); // TODO : into camera container
+M3D Camera_R_wrt_Lidar1(Eye3d); // TODO : into camera container
+V3D Camera_T_wrt_Lidar2(Zero3d); // TODO : into camera container
+M3D Camera_R_wrt_Lidar2(Eye3d); // TODO : into camera container
 
 
 
@@ -177,9 +178,6 @@ M3D Camera_R_wrt_Lidar2(Eye3d);
 MeasureGroup Measures;
 state_ikfom state_point, state_point_last;
 esekfom::esekf<state_ikfom, 12, input_ikfom> kf;
-esekfom::esekf<state_ikfom, 12, input_ikfom> kf_camera;
-sensor_msgs::msg::Image::SharedPtr image;
-double match_camera_time;
 
 vect3 pos_lid;
 
@@ -353,16 +351,7 @@ void camera_cbk(const std::shared_ptr<sensor_msgs::msg::CompressedImage> &msg,
     
     std::lock_guard<std::mutex> lock(mtx_buffer);
 
-    //  Clear the buffer if there is a significant timing issue
-    // if (Measures.match_camera_time < last_timestamp_camera)
-    // {
-    //     std::cerr << "Camera timestamp issue, clearing buffer" << std::endl;
-    //     camera_buffer.clear();
-    //     camera_time_buffer.clear();
-
-    // }
-    camera_buffer.clear();
-    camera_time_buffer.clear();
+    camera_time_buffers[0].clear(); // TODO : need for sync_packages
 
     // Update the parameter with the processed image
     image_ptr = bridge_image_msg;
@@ -370,11 +359,10 @@ void camera_cbk(const std::shared_ptr<sensor_msgs::msg::CompressedImage> &msg,
     // Update the measurement and buffer
     Measures.match_camera_time = get_time_sec(image_ptr->header.stamp);
     last_timestamp_camera = Measures.match_camera_time;
-    camera_buffer.push_back(image_ptr);
-    camera_time_buffer.push_back(Measures.match_camera_time);
+    // camera_buffer.push_back(image_ptr);
+    camera_time_buffers[0].push_back(Measures.match_camera_time); // TODO : need for sync_packages
     
 
-    camera_count++;
 
     // Notify waiting threads
     sig_buffer.notify_all();
@@ -533,7 +521,7 @@ bool sync_packages(MeasureGroup &meas)
     /*** push imu data, and pop from imu buffer ***/
     double imu_time = get_time_sec(imu_buffer.front()->header.stamp);
     meas.imu.clear();
-    meas.image = camera_buffer.front();
+    // meas.image = camera_buffer.front(); // TODO : wrong camera buffer
     meas.match_camera_time  = get_time_sec(meas.image->header.stamp);
 
     while ((!imu_buffer.empty()) && (imu_time < lidar_end_time))
@@ -544,8 +532,8 @@ bool sync_packages(MeasureGroup &meas)
         imu_buffer.pop_front();
     }
     // Pop the matched image from the buffer
-    camera_time_buffer.pop_front();
-    camera_buffer.pop_front();
+    camera_time_buffers[0].pop_front(); // TODO : need for sync_packages
+    // camera_buffer.pop_front();
     lidar_buffer.pop_front();
     time_buffer.pop_front();
     lidar_pushed = false;
@@ -1115,6 +1103,7 @@ public:
         this->declare_parameter<bool>("mapping.extrinsic_est_en", true);
         this->declare_parameter<bool>("pcd_save.pcd_save_en", false);
         this->declare_parameter<int>("pcd_save.interval", -1);
+        this->declare_parameter<int>("camera_number", cam_num);
         this->declare_parameter<vector<double>>("mapping.extrinsic_T", vector<double>());
         this->declare_parameter<vector<double>>("mapping.extrinsic_R", vector<double>());
         this->declare_parameter<vector<double>>("color_mapping0.extrinsic_T", vector<double>());
@@ -1144,9 +1133,6 @@ public:
         this->get_parameter_or<string>("map_file_path", map_file_path, "");
         this->get_parameter_or<string>("common.lid_topic", lid_topic, "/livox/lidar");
         this->get_parameter_or<string>("common.imu_topic", imu_topic,"/livox/imu");
-        this->get_parameter_or<string>("common.camera_topic0", camera_topic0, "/camera_0_CompressedImage");
-        this->get_parameter_or<string>("common.camera_topic1", camera_topic1, "/camera_1_CompressedImage");
-        this->get_parameter_or<string>("common.camera_topic2", camera_topic2, "/camera_2_CompressedImage");
         this->get_parameter_or<bool>("common.time_sync_en", time_sync_en, false);
         this->get_parameter_or<double>("common.time_offset_lidar_to_imu", time_diff_lidar_to_imu, 0.0);
         this->get_parameter_or<double>("filter_size_corner",filter_size_corner_min,0.5);
@@ -1173,27 +1159,32 @@ public:
         this->get_parameter_or<vector<double>>("mapping.extrinsic_T", extrinT, vector<double>());
         this->get_parameter_or<vector<double>>("mapping.extrinsic_R", extrinR, vector<double>());
         // color mapping param
+        this->get_parameter_or<int>("camera_number", camera_number, 3);
         this->get_parameter_or<vector<double>>("color_mapping0.extrinsic_T", extrinT_lc0, vector<double>());
         this->get_parameter_or<vector<double>>("color_mapping0.extrinsic_R", extrinR_lc0, vector<double>());
         this->get_parameter_or<vector<double>>("color_mapping0.K_camera", K_camera0, vector<double>());
         this->get_parameter_or<vector<double>>("color_mapping0.D_camera", D_camera0, vector<double>());
-        this->get_parameter_or<string>("common.camera_topic0", camera_topic0, "/camera_0_CompressedImage");
+        this->get_parameter_or<string>("common.camera_topic0", camera_topics[0], "/camera_0_CompressedImage");
         this->get_parameter_or<double>("color_mapping.time_offset_lidar_to_camera", time_offset_lidar_camera, 0.0);
 
         this->get_parameter_or<vector<double>>("color_mapping1.extrinsic_T", extrinT_lc1, vector<double>());
         this->get_parameter_or<vector<double>>("color_mapping1.extrinsic_R", extrinR_lc1, vector<double>());
         this->get_parameter_or<vector<double>>("color_mapping1.K_camera", K_camera1, vector<double>());
         this->get_parameter_or<vector<double>>("color_mapping1.D_camera", D_camera1, vector<double>());
-        this->get_parameter_or<string>("common.camera_topic1", camera_topic1, "/camera_1_CompressedImage");
+        this->get_parameter_or<string>("common.camera_topic1", camera_topics[1], "/camera_1_CompressedImage");
      
 
         this->get_parameter_or<vector<double>>("color_mapping2.extrinsic_T", extrinT_lc2, vector<double>());
         this->get_parameter_or<vector<double>>("color_mapping2.extrinsic_R", extrinR_lc2, vector<double>());
         this->get_parameter_or<vector<double>>("color_mapping2.K_camera", K_camera2, vector<double>());
         this->get_parameter_or<vector<double>>("color_mapping2.D_camera", D_camera2, vector<double>());
-        this->get_parameter_or<string>("common.camera_topic2", camera_topic2, "/camera_2_CompressedImage");
+        this->get_parameter_or<string>("common.camera_topic2", camera_topics[2], "/camera_2_CompressedImage");
 
+        if(cam_num != camera_number)
+        {
+            RCLCPP_WARN(this->get_logger(), "Wrong number of camera.\n please check config file or const int cam_num\n");
 
+        }
 
 
         cout<<"p_pre->lidar_type "<<p_pre->lidar_type<<endl;
@@ -1334,16 +1325,16 @@ public:
 
 
         sub_image_0 = this->create_subscription<sensor_msgs::msg::CompressedImage>(
-    camera_topic0, rclcpp::QoS(10), [](const sensor_msgs::msg::CompressedImage::SharedPtr msg) {
-        camera_cbk(msg, Measures.image0);
+    camera_topics[0], rclcpp::QoS(10), [this](const sensor_msgs::msg::CompressedImage::SharedPtr msg) {
+        camera_cbk(msg, Measures.images[0]);
     });
     sub_image_1 = this->create_subscription<sensor_msgs::msg::CompressedImage>(
-    camera_topic1, rclcpp::QoS(10), [](const sensor_msgs::msg::CompressedImage::SharedPtr msg) {
-        camera_cbk(msg, Measures.image1);
+    camera_topics[1], rclcpp::QoS(10), [this](const sensor_msgs::msg::CompressedImage::SharedPtr msg) {
+        camera_cbk(msg, Measures.images[1]);
     });
     sub_image_2 = this->create_subscription<sensor_msgs::msg::CompressedImage>(
-    camera_topic2, rclcpp::QoS(10), [](const sensor_msgs::msg::CompressedImage::SharedPtr msg) {
-        camera_cbk(msg, Measures.image2);
+    camera_topics[2], rclcpp::QoS(10), [this](const sensor_msgs::msg::CompressedImage::SharedPtr msg) {
+        camera_cbk(msg, Measures.images[2]);
     });
 
 
@@ -1502,27 +1493,26 @@ private:
             t5 = omp_get_wtime();
             
             /******* color mapping *******/
-            if (camera_pushed) {
                 // RCLCPP_INFO(this->get_logger(), "camera_pushed is true. Processing color mapping...");
 
-                if (!Measures.image0) {
+                if (!Measures.images[0]) {
                     // RCLCPP_ERROR(this->get_logger(), "Measures.image is nullptr. Skipping color mapping.");
                     return;
-                } else if (Measures.image0->data.empty()) {
+                } else if (Measures.images[0]->data.empty()) {
                     // RCLCPP_ERROR(this->get_logger(), "Measures.image->data is empty. Skipping color mapping.");
                     return;
                 }
-                if (!Measures.image1) {
+                if (!Measures.images[1]) {
                     // RCLCPP_ERROR(this->get_logger(), "Measures.image is nullptr. Skipping color mapping.");
                     return;
-                } else if (Measures.image1->data.empty()) {
+                } else if (Measures.images[1]->data.empty()) {
                     // RCLCPP_ERROR(this->get_logger(), "Measures.image->data is empty. Skipping color mapping.");
                     return;
                 }
-                if (!Measures.image2) {
+                if (!Measures.images[2]) {
                     // RCLCPP_ERROR(this->get_logger(), "Measures.image is nullptr. Skipping color mapping.");
                     return;
-                } else if (Measures.image2->data.empty()) {
+                } else if (Measures.images[2]->data.empty()) {
                     // RCLCPP_ERROR(this->get_logger(), "Measures.image->data is empty. Skipping color mapping.");
                     return;
                 }
@@ -1579,15 +1569,15 @@ private:
                 pcl::PointCloud<pcl::PointXYZRGB>::Ptr combined_pc_color(new pcl::PointCloud<pcl::PointXYZRGB>());
 
                 
-                generateColorMap(Measures.image0, state_camera0, state_lidar, feats_down_body, pc_color0, K_camera0, D_camera0);
+                generateColorMap(Measures.images[0], state_camera0, state_lidar, feats_down_body, pc_color0, K_camera0, D_camera0);
                 pcl::transformPointCloud(*pc_color0, *pc_color0, state_lidar.matrix());
                 *combined_pc_color += *pc_color0;
 
-                generateColorMap(Measures.image1, state_camera1, state_lidar, feats_down_body, pc_color1, K_camera1, D_camera1);
+                generateColorMap(Measures.images[1], state_camera1, state_lidar, feats_down_body, pc_color1, K_camera1, D_camera1);
                 pcl::transformPointCloud(*pc_color1, *pc_color1, state_lidar.matrix());
                 *combined_pc_color += *pc_color1;
 
-                generateColorMap(Measures.image2, state_camera2, state_lidar, feats_down_body, pc_color2, K_camera2, D_camera2);
+                generateColorMap(Measures.images[2], state_camera2, state_lidar, feats_down_body, pc_color2, K_camera2, D_camera2);
                 pcl::transformPointCloud(*pc_color2, *pc_color2, state_lidar.matrix());
                 *combined_pc_color += *pc_color2;
 
@@ -1597,23 +1587,18 @@ private:
                 output_msg.header.frame_id = "camera_init"; // Adjust frame as needed
 
 
-                if (!camera_time_buffer.empty()) {
-                    output_msg.header.stamp = get_ros_time(camera_time_buffer.front());
+                if (!camera_time_buffers[0].empty()) { // TODO : need for sync_packages
+                    output_msg.header.stamp = get_ros_time(camera_time_buffers[0].front()); // TODO : need for sync_packages
                     pubColorMap_->publish(output_msg);
                     // RCLCPP_INFO(this->get_logger(), "Published colorized point cloud with %lu points.", combined_pc_color->points.size());
                 } 
                 else {
                     RCLCPP_ERROR(this->get_logger(), "camera_time_buffer is empty. Skipping publish.");
-                    camera_pushed = false;
                 }
 
                  
 
                 
-            } 
-            else {
-                RCLCPP_WARN(this->get_logger(), "camera_pushed is false. Skipping color mapping.");
-            }
             state_point_last = kf.get_x();
 
 
