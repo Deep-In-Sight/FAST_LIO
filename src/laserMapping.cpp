@@ -683,35 +683,35 @@ void generateColorMap(sensor_msgs::msg::Image::SharedPtr msg_rgb,
         return;
     }
 
-    RCLCPP_INFO(rclcpp::get_logger("generateColorMap"), "Camera intrinsics fx=%.2f, fy=%.2f, cx=%.2f, cy=%.2f",
-                K_camera[0], K_camera[4], K_camera[2], K_camera[5]);
+    // RCLCPP_INFO(rclcpp::get_logger("generateColorMap"), "Camera intrinsics fx=%.2f, fy=%.2f, cx=%.2f, cy=%.2f",
+    //             K_camera[0], K_camera[4], K_camera[2], K_camera[5]);
 
     // Transform from LiDAR to Camera
     Eigen::Affine3d T_cl = camera_state.inverse() * lidar_state;
     Eigen::Matrix3d Rcl = T_cl.rotation();
     Eigen::Vector3d tcl = T_cl.translation();
 
-    RCLCPP_INFO(rclcpp::get_logger("generateColorMap"), 
-                "T_cl: translation=(%f, %f, %f), rotation_row_1=(%f, %f, %f), rotation_row_2=(%f, %f, %f), rotation_row_3=(%f, %f, %f)",
-                tcl.x(), tcl.y(), tcl.z(),
-                Rcl(0, 0), Rcl(0, 1), Rcl(0, 2),
-                Rcl(1, 0), Rcl(1, 1), Rcl(1, 2),
-                Rcl(2, 0), Rcl(2, 1), Rcl(2, 2));
+    // RCLCPP_INFO(rclcpp::get_logger("generateColorMap"), 
+    //             "T_cl: translation=(%f, %f, %f), rotation_row_1=(%f, %f, %f), rotation_row_2=(%f, %f, %f), rotation_row_3=(%f, %f, %f)",
+    //             tcl.x(), tcl.y(), tcl.z(),
+    //             Rcl(0, 0), Rcl(0, 1), Rcl(0, 2),
+    //             Rcl(1, 0), Rcl(1, 1), Rcl(1, 2),
+    //             Rcl(2, 0), Rcl(2, 1), Rcl(2, 2));
 
 
-    RCLCPP_INFO(rclcpp::get_logger("generateColorMap"), 
-            "Camera state: translation=(%f, %f, %f), rotation_row_1=(%f, %f, %f), rotation_row_2=(%f, %f, %f), rotation_row_3=(%f, %f, %f)",
-            camera_state.translation().x(), camera_state.translation().y(), camera_state.translation().z(),
-            camera_state.rotation()(0, 0), camera_state.rotation()(0, 1), camera_state.rotation()(0, 2),
-            camera_state.rotation()(1, 0), camera_state.rotation()(1, 1), camera_state.rotation()(1, 2),
-            camera_state.rotation()(2, 0), camera_state.rotation()(2, 1), camera_state.rotation()(2, 2));
+    // RCLCPP_INFO(rclcpp::get_logger("generateColorMap"), 
+    //         "Camera state: translation=(%f, %f, %f), rotation_row_1=(%f, %f, %f), rotation_row_2=(%f, %f, %f), rotation_row_3=(%f, %f, %f)",
+    //         camera_state.translation().x(), camera_state.translation().y(), camera_state.translation().z(),
+    //         camera_state.rotation()(0, 0), camera_state.rotation()(0, 1), camera_state.rotation()(0, 2),
+    //         camera_state.rotation()(1, 0), camera_state.rotation()(1, 1), camera_state.rotation()(1, 2),
+    //         camera_state.rotation()(2, 0), camera_state.rotation()(2, 1), camera_state.rotation()(2, 2));
 
-    RCLCPP_INFO(rclcpp::get_logger("generateColorMap"), 
-            "Lidar state: translation=(%f, %f, %f), rotation_row_1=(%f, %f, %f), rotation_row_2=(%f, %f, %f), rotation_row_3=(%f, %f, %f)",
-            lidar_state.translation().x(), lidar_state.translation().y(), lidar_state.translation().z(),
-            lidar_state.rotation()(0, 0), lidar_state.rotation()(0, 1), lidar_state.rotation()(0, 2),
-            lidar_state.rotation()(1, 0), lidar_state.rotation()(1, 1), lidar_state.rotation()(1, 2),
-            lidar_state.rotation()(2, 0), lidar_state.rotation()(2, 1), lidar_state.rotation()(2, 2));
+    // RCLCPP_INFO(rclcpp::get_logger("generateColorMap"), 
+    //         "Lidar state: translation=(%f, %f, %f), rotation_row_1=(%f, %f, %f), rotation_row_2=(%f, %f, %f), rotation_row_3=(%f, %f, %f)",
+    //         lidar_state.translation().x(), lidar_state.translation().y(), lidar_state.translation().z(),
+    //         lidar_state.rotation()(0, 0), lidar_state.rotation()(0, 1), lidar_state.rotation()(0, 2),
+    //         lidar_state.rotation()(1, 0), lidar_state.rotation()(1, 1), lidar_state.rotation()(1, 2),
+    //         lidar_state.rotation()(2, 0), lidar_state.rotation()(2, 1), lidar_state.rotation()(2, 2));
 
     // Convert ROS image to OpenCV format
     cv::Mat rgb = cv_bridge::toCvCopy(*msg_rgb, "bgr8")->image;
@@ -733,11 +733,11 @@ void generateColorMap(sensor_msgs::msg::Image::SharedPtr msg_rgb,
                     "Processing point %lu: LiDAR (%.2f, %.2f, %.2f)", i, point_pc.x(), point_pc.y(), point_pc.z());
 
 
-        RCLCPP_INFO(
-            rclcpp::get_logger("generateColorMap"),
-            "Transformed point to camera: (%f, %f, %f)", 
-            point_camera.x(), point_camera.y(), point_camera.z()
-        );
+        // RCLCPP_INFO(
+        //     rclcpp::get_logger("generateColorMap"),
+        //     "Transformed point to camera: (%f, %f, %f)", 
+        //     point_camera.x(), point_camera.y(), point_camera.z()
+        // );
 
 
         if (!std::isfinite(point_camera.z()) || point_camera.z() <= 0) {
@@ -1227,7 +1227,7 @@ public:
         cout<<"p_pre->lidar_type "<<p_pre->lidar_type<<endl;
 
 
-        RCLCPP_INFO(this->get_logger(), "p_pre->lidar_type %d", p_pre->lidar_type);
+        // RCLCPP_INFO(this->get_logger(), "p_pre->lidar_type %d", p_pre->lidar_type);
 
         path.header.stamp = this->get_clock()->now();
         path.header.frame_id ="camera_init";
@@ -1395,7 +1395,7 @@ public:
 
         map_save_srv_ = this->create_service<std_srvs::srv::Trigger>("map_save", std::bind(&LaserMappingNode::map_save_callback, this, std::placeholders::_1, std::placeholders::_2));
 
-        RCLCPP_INFO(this->get_logger(), "Node init finished.");
+        // RCLCPP_INFO(this->get_logger(), "Node init finished.");
     }
 
     ~LaserMappingNode()
@@ -1457,7 +1457,7 @@ private:
             /*** initialize the map kdtree ***/
             if(ikdtree.Root_Node == nullptr)
             {
-                RCLCPP_INFO(this->get_logger(), "Initialize the map kdtree");
+                // RCLCPP_INFO(this->get_logger(), "Initialize the map kdtree");
                 if(feats_down_size > 5)
                 {
                     ikdtree.set_downsample_param(filter_size_map_min);
@@ -1531,27 +1531,27 @@ private:
             
             /******* color mapping *******/
             if (camera_pushed) {
-                RCLCPP_INFO(this->get_logger(), "camera_pushed is true. Processing color mapping...");
+                // RCLCPP_INFO(this->get_logger(), "camera_pushed is true. Processing color mapping...");
 
                 if (!Measures.image0) {
-                    RCLCPP_ERROR(this->get_logger(), "Measures.image is nullptr. Skipping color mapping.");
+                    // RCLCPP_ERROR(this->get_logger(), "Measures.image is nullptr. Skipping color mapping.");
                     return;
                 } else if (Measures.image0->data.empty()) {
-                    RCLCPP_ERROR(this->get_logger(), "Measures.image->data is empty. Skipping color mapping.");
+                    // RCLCPP_ERROR(this->get_logger(), "Measures.image->data is empty. Skipping color mapping.");
                     return;
                 }
                 if (!Measures.image1) {
-                    RCLCPP_ERROR(this->get_logger(), "Measures.image is nullptr. Skipping color mapping.");
+                    // RCLCPP_ERROR(this->get_logger(), "Measures.image is nullptr. Skipping color mapping.");
                     return;
                 } else if (Measures.image1->data.empty()) {
-                    RCLCPP_ERROR(this->get_logger(), "Measures.image->data is empty. Skipping color mapping.");
+                    // RCLCPP_ERROR(this->get_logger(), "Measures.image->data is empty. Skipping color mapping.");
                     return;
                 }
                 if (!Measures.image2) {
-                    RCLCPP_ERROR(this->get_logger(), "Measures.image is nullptr. Skipping color mapping.");
+                    // RCLCPP_ERROR(this->get_logger(), "Measures.image is nullptr. Skipping color mapping.");
                     return;
                 } else if (Measures.image2->data.empty()) {
-                    RCLCPP_ERROR(this->get_logger(), "Measures.image->data is empty. Skipping color mapping.");
+                    // RCLCPP_ERROR(this->get_logger(), "Measures.image->data is empty. Skipping color mapping.");
                     return;
                 }
 
@@ -1562,18 +1562,18 @@ private:
                 state_ikfom cameratime_state = kf.get_x();
 
                 //debug
-                RCLCPP_INFO(rclcpp::get_logger("laser_mapping"), "cameratime_state.pos: (%f, %f, %f)", 
-                cameratime_state.pos[0], cameratime_state.pos[1], cameratime_state.pos[2]);
+                // RCLCPP_INFO(rclcpp::get_logger("laser_mapping"), "cameratime_state.pos: (%f, %f, %f)", 
+                // cameratime_state.pos[0], cameratime_state.pos[1], cameratime_state.pos[2]);
 
-                RCLCPP_INFO(rclcpp::get_logger("laser_mapping"), "cameratime_state.rot: (%f, %f, %f, %f)", 
-                cameratime_state.rot.w(), cameratime_state.rot.x(), cameratime_state.rot.y(), cameratime_state.rot.z());
+                // RCLCPP_INFO(rclcpp::get_logger("laser_mapping"), "cameratime_state.rot: (%f, %f, %f, %f)", 
+                // cameratime_state.rot.w(), cameratime_state.rot.x(), cameratime_state.rot.y(), cameratime_state.rot.z());
 
                 // Log kf.get_x()
-                RCLCPP_INFO(rclcpp::get_logger("laser_mapping"), "kf.get_x().pos: (%f, %f, %f)", 
-                    kf.get_x().pos[0], kf.get_x().pos[1], kf.get_x().pos[2]);
+                // RCLCPP_INFO(rclcpp::get_logger("laser_mapping"), "kf.get_x().pos: (%f, %f, %f)", 
+                    // kf.get_x().pos[0], kf.get_x().pos[1], kf.get_x().pos[2]);
 
-                RCLCPP_INFO(rclcpp::get_logger("laser_mapping"), "kf.get_x().rot: (%f, %f, %f, %f)", 
-                    kf.get_x().rot.w(), kf.get_x().rot.x(), kf.get_x().rot.y(), kf.get_x().rot.z());
+                // RCLCPP_INFO(rclcpp::get_logger("laser_mapping"), "kf.get_x().rot: (%f, %f, %f, %f)", 
+                    // kf.get_x().rot.w(), kf.get_x().rot.x(), kf.get_x().rot.y(), kf.get_x().rot.z());
 
 
                 Eigen::Affine3d state_imu_camera_time = Eigen::Affine3d::Identity();
@@ -1582,14 +1582,14 @@ private:
 
 
                                 // Log T_IL and T_LC
-                RCLCPP_INFO(this->get_logger(), "T_IL translation: (%f, %f, %f)", T_IL.translation().x(), T_IL.translation().y(), T_IL.translation().z());
-                RCLCPP_INFO(this->get_logger(), "T_IL rotation: (%f, %f, %f)", T_IL.linear()(0, 0), T_IL.linear()(1, 1), T_IL.linear()(2, 2));
-                RCLCPP_INFO(this->get_logger(), "T_LC translation: (%f, %f, %f)", T_LC0.translation().x(), T_LC0.translation().y(), T_LC0.translation().z());
-                RCLCPP_INFO(this->get_logger(), "T_LC rotation: (%f, %f, %f)", T_LC0.linear()(0, 0), T_LC0.linear()(1, 1), T_LC0.linear()(2, 2));
-                RCLCPP_INFO(this->get_logger(), "T_LC translation: (%f, %f, %f)", T_LC1.translation().x(), T_LC1.translation().y(), T_LC1.translation().z());
-                RCLCPP_INFO(this->get_logger(), "T_LC rotation: (%f, %f, %f)", T_LC1.linear()(0, 0), T_LC1.linear()(1, 1), T_LC1.linear()(2, 2));
-                RCLCPP_INFO(this->get_logger(), "T_LC translation: (%f, %f, %f)", T_LC2.translation().x(), T_LC2.translation().y(), T_LC2.translation().z());
-                RCLCPP_INFO(this->get_logger(), "T_LC rotation: (%f, %f, %f)", T_LC2.linear()(0, 0), T_LC2.linear()(1, 1), T_LC2.linear()(2, 2));
+                // RCLCPP_INFO(this->get_logger(), "T_IL translation: (%f, %f, %f)", T_IL.translation().x(), T_IL.translation().y(), T_IL.translation().z());
+                // RCLCPP_INFO(this->get_logger(), "T_IL rotation: (%f, %f, %f)", T_IL.linear()(0, 0), T_IL.linear()(1, 1), T_IL.linear()(2, 2));
+                // RCLCPP_INFO(this->get_logger(), "T_LC translation: (%f, %f, %f)", T_LC0.translation().x(), T_LC0.translation().y(), T_LC0.translation().z());
+                // RCLCPP_INFO(this->get_logger(), "T_LC rotation: (%f, %f, %f)", T_LC0.linear()(0, 0), T_LC0.linear()(1, 1), T_LC0.linear()(2, 2));
+                // RCLCPP_INFO(this->get_logger(), "T_LC translation: (%f, %f, %f)", T_LC1.translation().x(), T_LC1.translation().y(), T_LC1.translation().z());
+                // RCLCPP_INFO(this->get_logger(), "T_LC rotation: (%f, %f, %f)", T_LC1.linear()(0, 0), T_LC1.linear()(1, 1), T_LC1.linear()(2, 2));
+                // RCLCPP_INFO(this->get_logger(), "T_LC translation: (%f, %f, %f)", T_LC2.translation().x(), T_LC2.translation().y(), T_LC2.translation().z());
+                // RCLCPP_INFO(this->get_logger(), "T_LC rotation: (%f, %f, %f)", T_LC2.linear()(0, 0), T_LC2.linear()(1, 1), T_LC2.linear()(2, 2));
 
 
                 Eigen::Affine3d state_camera0 = state_imu_camera_time * T_IL * T_LC0;
@@ -1601,8 +1601,8 @@ private:
                 state_imu.rotate(Eigen::Quaterniond(kf.get_x().rot));
                 Eigen::Affine3d state_lidar = state_imu * T_IL;
 
-                RCLCPP_INFO(this->get_logger(), "Generating color map...");
-                RCLCPP_INFO(rclcpp::get_logger("laser_mapping"), "feats_undistort size: %lu", feats_undistort->points.size());
+                // RCLCPP_INFO(this->get_logger(), "Generating color map...");
+                // RCLCPP_INFO(rclcpp::get_logger("laser_mapping"), "feats_undistort size: %lu", feats_undistort->points.size());
                 
                 pcl::PointCloud<pcl::PointXYZRGB>::Ptr combined_pc_color(new pcl::PointCloud<pcl::PointXYZRGB>());
 
@@ -1628,7 +1628,7 @@ private:
                 if (!camera_time_buffer.empty()) {
                     output_msg.header.stamp = get_ros_time(camera_time_buffer.front());
                     pubColorMap_->publish(output_msg);
-                    RCLCPP_INFO(this->get_logger(), "Published colorized point cloud with %lu points.", combined_pc_color->points.size());
+                    // RCLCPP_INFO(this->get_logger(), "Published colorized point cloud with %lu points.", combined_pc_color->points.size());
                 } 
                 else {
                     RCLCPP_ERROR(this->get_logger(), "camera_time_buffer is empty. Skipping publish.");
