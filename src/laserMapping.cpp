@@ -725,6 +725,10 @@ void generateColorMap(sensor_msgs::msg::Image::SharedPtr msg_rgb,
         Eigen::Vector3d point_pc = {pc->points[i].x, pc->points[i].y, pc->points[i].z};
         Eigen::Vector3d point_camera = Rcl * point_pc + tcl;
 
+        float degree = atan2(point_pc.x(), point_pc.y()) * 57.29579143;
+        degree -= 90;
+        if(degree < 0) 
+            degree += 360;
         RCLCPP_INFO(rclcpp::get_logger("generateColorMap"), 
                     "Processing point %lu: LiDAR (%.2f, %.2f, %.2f)", i, point_pc.x(), point_pc.y(), point_pc.z());
 
