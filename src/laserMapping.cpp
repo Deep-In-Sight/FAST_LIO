@@ -155,8 +155,8 @@ V3D euler_cur;
 V3D position_last(Zero3d);
 V3D Lidar_T_wrt_IMU(Zero3d);
 M3D Lidar_R_wrt_IMU(Eye3d);
-std::array<V3D, 3> Camera_T_wrt_Lidar { V3D(Zero3d), V3D(Zero3d), V3D(Zero3d) }; // Camera_T_wrt_Lidar
-std::array<M3D, 3> Camera_R_wrt_Lidar { M3D(Eye3d), M3D(Eye3d), M3D(Eye3d) }; // Camera_R_wrt_Lidar
+std::array<V3D, cam_num> Camera_T_wrt_Lidar { V3D(Zero3d), V3D(Zero3d), V3D(Zero3d) }; // Camera_T_wrt_Lidar
+std::array<M3D, cam_num> Camera_R_wrt_Lidar { M3D(Eye3d), M3D(Eye3d), M3D(Eye3d) }; // Camera_R_wrt_Lidar
 
 
 /*** EKF inputs and output ***/
@@ -1052,78 +1052,45 @@ public:
 
         Lidar_T_wrt_IMU<<VEC_FROM_ARRAY(extrinT);
         Lidar_R_wrt_IMU<<MAT_FROM_ARRAY(extrinR);
+        std::array<std::shared_ptr<CameraProcess>, cam_num> p_cams;
+        std::array<Eigen::Matrix3d, cam_num> eigen_Ks;
+        std::array<Eigen::VectorXd, cam_num> eigen_Ds;
         
-        for (size_t i = 0; i < Camera_T_wrt_Lidar.size(); ++i) {
+        for (size_t i = 0; i < cam_num; ++i) {
+            // Extrinsic parameters
             Camera_T_wrt_Lidar[i] << VEC_FROM_ARRAY(extrinsic_t_l2c[i]);
             Camera_R_wrt_Lidar[i] << MAT_FROM_ARRAY(extrinsic_r_l2c[i]);
+            T_L2Cs[i].translation() = Camera_T_wrt_Lidar[i];
+            T_L2Cs[i].linear() = Camera_R_wrt_Lidar[i];
+
+            // Initialize CameraProcess and set extrinsics
+            p_cams[i] = std::make_shared<CameraProcess>();
+            p_cams[i]->set_extrinsic(Camera_T_wrt_Lidar[i], Camera_R_wrt_Lidar[i]);
+
+            // Intrinsic parameters
+            if (K_cameras[i].size() == 9) {
+                eigen_Ks[i] << K_cameras[i][0], K_cameras[i][1], K_cameras[i][2],
+                            K_cameras[i][3], K_cameras[i][4], K_cameras[i][5],
+                            K_cameras[i][6], K_cameras[i][7], K_cameras[i][8];
+            } else {
+                throw std::runtime_error("K_cameras[" + std::to_string(i) + "] must have exactly 9 elements");
+            }
+            eigen_Ds[i] = Eigen::VectorXd::Map(D_cameras[i].data(), D_cameras[i].size());
+
+            // Set intrinsic and distortion parameters
+            p_cams[i]->set_K(eigen_Ks[i]);
+            p_cams[i]->set_D(eigen_Ds[i]);
+            p_cams[i]->set_time_offset(time_offset_lidar_cameras);
         }
 
+        // IMU extrinsic and covariance settings
         T_IL.translation() = Lidar_T_wrt_IMU;
         T_IL.linear() = Lidar_R_wrt_IMU;
-
-        T_LC0.translation() = Camera_T_wrt_Lidar[0]; // TODO : modify
-        T_LC0.linear() = Camera_R_wrt_Lidar[0]; // TODO : modify
-        T_LC1.translation() = Camera_T_wrt_Lidar[1]; // TODO : modify
-        T_LC1.linear() = Camera_R_wrt_Lidar[1]; // TODO : modify
-        T_LC2.translation() = Camera_T_wrt_Lidar[2]; // TODO : modify
-        T_LC2.linear() = Camera_R_wrt_Lidar[2]; // TODO : modify
-
         p_imu->set_extrinsic(Lidar_T_wrt_IMU, Lidar_R_wrt_IMU);
         p_imu->set_gyr_cov(V3D(gyr_cov, gyr_cov, gyr_cov));
         p_imu->set_acc_cov(V3D(acc_cov, acc_cov, acc_cov));
         p_imu->set_gyr_bias_cov(V3D(b_gyr_cov, b_gyr_cov, b_gyr_cov));
         p_imu->set_acc_bias_cov(V3D(b_acc_cov, b_acc_cov, b_acc_cov));
-
-        std::shared_ptr<CameraProcess> p_cam0(new CameraProcess()); // TODO : modify
-        std::shared_ptr<CameraProcess> p_cam1(new CameraProcess()); // TODO : modify
-        std::shared_ptr<CameraProcess> p_cam2(new CameraProcess()); // TODO : modify
-        // Set extrinsic parameters
-        p_cam0->set_extrinsic(Camera_T_wrt_Lidar[0], Camera_R_wrt_Lidar[0]); // TODO : modify
-        p_cam1->set_extrinsic(Camera_T_wrt_Lidar[1], Camera_R_wrt_Lidar[1]); // TODO : modify
-        p_cam2->set_extrinsic(Camera_T_wrt_Lidar[2], Camera_R_wrt_Lidar[2]); // TODO : modify
-
-        // Convert K_camera (std::vector<double>) to Eigen::Matrix3d
-        Eigen::Matrix3d eigen_K0; // TODO : modify
-        if (K_cameras[0].size() == 9) { // Ensure the size is correct
-            eigen_K0 << K_cameras[0][0], K_cameras[0][1], K_cameras[0][2],
-               K_cameras[0][3], K_cameras[0][4], K_cameras[0][5],
-               K_cameras[0][6], K_cameras[0][7], K_cameras[0][8];
-        } else {
-            throw std::runtime_error("K_cameras[0] must have exactly 9 elements");
-        }
-        Eigen::Matrix3d eigen_K1; // TODO : modify
-        if (K_cameras[1].size() == 9) { // Ensure the size is correct
-            eigen_K1 << K_cameras[1][0], K_cameras[1][1], K_cameras[1][2],
-               K_cameras[1][3], K_cameras[1][4], K_cameras[1][5],
-               K_cameras[1][6], K_cameras[1][7], K_cameras[1][8];
-        } else {
-            throw std::runtime_error("K_cameras[1] must have exactly 9 elements");
-        }
-        Eigen::Matrix3d eigen_K2; // TODO : modify
-        if (K_cameras[2].size() == 9) { // Ensure the size is correct
-            eigen_K2 << K_cameras[2][0], K_cameras[2][1], K_cameras[2][2],
-               K_cameras[2][3], K_cameras[2][4], K_cameras[2][5],
-               K_cameras[2][6], K_cameras[2][7], K_cameras[2][8];
-        } else {
-            throw std::runtime_error("K_cameras[2] must have exactly 9 elements");
-        }
-        p_cam0->set_K(eigen_K0); // TODO : modify
-        p_cam1->set_K(eigen_K1); // TODO : modify
-        p_cam2->set_K(eigen_K2); // TODO : modify
-
-        // Convert D_camera (std::vector<double>) to Eigen::VectorXd
-        Eigen::VectorXd eigen_D0 = Eigen::VectorXd::Map(D_cameras[0].data(), D_cameras[0].size()); // TODO : modify
-        Eigen::VectorXd eigen_D1 = Eigen::VectorXd::Map(D_cameras[1].data(), D_cameras[1].size()); // TODO : modify
-        Eigen::VectorXd eigen_D2 = Eigen::VectorXd::Map(D_cameras[2].data(), D_cameras[2].size()); // TODO : modify
-
-        p_cam0->set_D(eigen_D0); // TODO : modify
-        p_cam1->set_D(eigen_D1); // TODO : modify
-        p_cam2->set_D(eigen_D2); // TODO : modify
-
-        // Set the time offset
-        p_cam0->set_time_offset(time_offset_lidar_cameras); // TODO : modify
-        p_cam1->set_time_offset(time_offset_lidar_cameras); // TODO : modify
-        p_cam2->set_time_offset(time_offset_lidar_cameras); // TODO : modify
         
 
         fill(epsi, epsi+23, 0.001);
@@ -1158,7 +1125,7 @@ public:
 
 
 
-            sub_image_0 = this->create_subscription<sensor_msgs::msg::CompressedImage>( // TODO : modify
+        sub_image_0 = this->create_subscription<sensor_msgs::msg::CompressedImage>( // TODO : modify
         camera_topics[0], rclcpp::QoS(10), [this](const sensor_msgs::msg::CompressedImage::SharedPtr msg) {
             camera_cbk(msg, Measures.images[0]);
         });
@@ -1474,10 +1441,10 @@ private:
                 state_imu_camera_time.rotate(Eigen::Quaterniond(cameratime_state.rot));
 
 
-
-                Eigen::Affine3d state_camera0 = state_imu_camera_time * T_IL * T_LC0; // TODO : modify
-                Eigen::Affine3d state_camera1 = state_imu_camera_time * T_IL * T_LC1; // TODO : modify
-                Eigen::Affine3d state_camera2 = state_imu_camera_time * T_IL * T_LC2; // TODO : modify
+                std::array<Eigen::Affine3d, 3> state_cameras;
+                for(int i = 0; i < 3; i++){
+                    state_cameras[i] = state_imu_camera_time * T_IL * T_L2Cs[i];
+                }
 
                 Eigen::Affine3d state_imu = Eigen::Affine3d::Identity();
                 state_imu.translate(Eigen::Vector3d(kf.get_x().pos));
@@ -1488,15 +1455,15 @@ private:
                 pcl::PointCloud<pcl::PointXYZRGB>::Ptr combined_pc_color(new pcl::PointCloud<pcl::PointXYZRGB>());
 
                 
-                generateColorMap(Measures.images[0], state_camera0, state_lidar, feats_down_body, pc_color0, K_cameras[0], D_cameras[0]); // TODO : modify
+                generateColorMap(Measures.images[0], state_cameras[0], state_lidar, feats_down_body, pc_color0, K_cameras[0], D_cameras[0]); // TODO : modify
                 pcl::transformPointCloud(*pc_color0, *pc_color0, state_lidar.matrix());
                 *combined_pc_color += *pc_color0;
 
-                generateColorMap(Measures.images[1], state_camera1, state_lidar, feats_down_body, pc_color1, K_cameras[1], D_cameras[1]); // TODO : modify
+                generateColorMap(Measures.images[1], state_cameras[1], state_lidar, feats_down_body, pc_color1, K_cameras[1], D_cameras[1]); // TODO : modify
                 pcl::transformPointCloud(*pc_color1, *pc_color1, state_lidar.matrix());
                 *combined_pc_color += *pc_color1;
 
-                generateColorMap(Measures.images[2], state_camera2, state_lidar, feats_down_body, pc_color2, K_cameras[2], D_cameras[2]); // TODO : modify
+                generateColorMap(Measures.images[2], state_cameras[2], state_lidar, feats_down_body, pc_color2, K_cameras[2], D_cameras[2]); // TODO : modify
                 pcl::transformPointCloud(*pc_color2, *pc_color2, state_lidar.matrix());
                 *combined_pc_color += *pc_color2;
 
@@ -1584,9 +1551,7 @@ private:
 
 private:
     Eigen::Affine3d T_IL;
-    Eigen::Affine3d T_LC0; // TODO : into container
-    Eigen::Affine3d T_LC1; // TODO : into container
-    Eigen::Affine3d T_LC2; // TODO : into container
+    std::array<Eigen::Affine3d, 3> T_L2Cs;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudFull_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudFull_body_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudEffect_;
