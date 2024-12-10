@@ -729,8 +729,8 @@ void generateColorMap(sensor_msgs::msg::Image::SharedPtr msg_rgb,
         degree -= 90;
         if(degree < 0) 
             degree += 360;
-        RCLCPP_INFO(rclcpp::get_logger("generateColorMap"), 
-                    "Processing point %lu: LiDAR (%.2f, %.2f, %.2f)", i, point_pc.x(), point_pc.y(), point_pc.z());
+        // RCLCPP_INFO(rclcpp::get_logger("generateColorMap"), 
+                    // "Processing point %lu: LiDAR (%.2f, %.2f, %.2f)", i, point_pc.x(), point_pc.y(), point_pc.z());
 
 
         // RCLCPP_INFO(
@@ -741,7 +741,7 @@ void generateColorMap(sensor_msgs::msg::Image::SharedPtr msg_rgb,
 
 
         if (!std::isfinite(point_camera.z()) || point_camera.z() <= 0) {
-            RCLCPP_WARN(rclcpp::get_logger("generateColorMap"), "Point %lu is behind the camera or invalid (z=%.2f)", i, point_camera.z());
+            // RCLCPP_WARN(rclcpp::get_logger("generateColorMap"), "Point %lu is behind the camera or invalid (z=%.2f)", i, point_camera.z());
             continue;
         }
 
@@ -750,7 +750,7 @@ void generateColorMap(sensor_msgs::msg::Image::SharedPtr msg_rgb,
         int v = static_cast<int>(K_camera[4] * point_2d.y() + K_camera[5]);
 
         if (u < 0 || u >= rgb.cols || v < 0 || v >= rgb.rows) {
-            RCLCPP_WARN(rclcpp::get_logger("generateColorMap"), "Point %lu out of image bounds: (u=%d, v=%d)", i, u, v);
+            // RCLCPP_WARN(rclcpp::get_logger("generateColorMap"), "Point %lu out of image bounds: (u=%d, v=%d)", i, u, v);
             continue;
         }
 
@@ -765,7 +765,7 @@ void generateColorMap(sensor_msgs::msg::Image::SharedPtr msg_rgb,
 
     }
 
-    RCLCPP_INFO(rclcpp::get_logger("generateColorMap"), "Finished processing, added %lu points to colored cloud", pc_color->points.size());
+    // RCLCPP_INFO(rclcpp::get_logger("generateColorMap"), "Finished processing, added %lu points to colored cloud", pc_color->points.size());
 }
 
 void publish_frame_world(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudFull)
@@ -1072,34 +1072,6 @@ void h_share_model(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_
     }
     solve_time += omp_get_wtime() - solve_start_;
 }
-
-
-// Eigen::Vector2d distort(Eigen::Vector2d point)
-// {
-//     double k1 = D_camera[0];
-//     double k2 = D_camera[1];
-//     double k3 = D_camera[4];
-//     double p1 = D_camera[2];
-//     double p2 = D_camera[3];
-
-//     double x2 = point.x() * point.x();
-//     double y2 = point.y() * point.y();
-
-//     double r2 = x2 + y2;
-//     double r4 = r2 * r2;
-//     double r6 = r2 * r4;
-
-//     double r_coeff = 1.0 + k1 * r2 + k2 * r4 + k3 * r6;
-//     double t_coeff1 = 2.0 * point.x() * point.y();
-//     double t_coeff2 = r2 + 2.0 * x2;
-//     double t_coeff3 = r2 + 2.0 * y2;
-//     double x = r_coeff * point.x() + p1 * t_coeff1 + p2 * t_coeff2;
-//     double y = r_coeff * point.y() + p1 * t_coeff3 + p2 * t_coeff1;
-
-//     return Eigen::Vector2d(x, y);
-
-// }
-
 
 
 class LaserMappingNode : public rclcpp::Node
