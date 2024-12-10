@@ -128,21 +128,12 @@ std::array<deque<double>, cam_num> camera_time_buffers;
 
 //color
 int camera_number = 0;
-vector<double>       extrinT_lc0(3, 0.0); // TODO : into camera container
-vector<double>       extrinR_lc0(9, 0.0); // TODO : into camera container
-vector<double>       extrinT_lc1(3, 0.0); // TODO : into camera container
-vector<double>       extrinR_lc1(9, 0.0); // TODO : into camera container
-vector<double>       extrinT_lc2(3, 0.0); // TODO : into camera container
-vector<double>       extrinR_lc2(9, 0.0); // TODO : into camera container
+std::array<std::vector<double>, cam_num> extrinsic_t_l2c; // extrinT_lc
+std::array<std::vector<double>, cam_num> extrinsic_r_l2c; // extrinR_lc
+std::array<std::vector<double>, cam_num> K_cameras; // K_camera
+std::array<std::vector<double>, cam_num> D_cameras; // D_camera
 
-vector<double>       K_camera0(9, 0.0); // TODO : into camera container
-vector<double>       D_camera0(5, 0.0); // TODO : into camera container
-vector<double>       K_camera1(9, 0.0); // TODO : into camera container
-vector<double>       D_camera1(5, 0.0); // TODO : into camera container
-vector<double>       K_camera2(9, 0.0); // TODO : into camera container
-vector<double>       D_camera2(5, 0.0); // TODO : into camera container
-
-double               time_offset_lidar_camera = 0.0;
+double               time_offset_lidar_cameras = 0.0;
 
 PointCloudXYZI::Ptr featsFromMap(new PointCloudXYZI());
 PointCloudXYZI::Ptr feats_undistort(new PointCloudXYZI());
@@ -346,7 +337,7 @@ void camera_cbk(const std::shared_ptr<sensor_msgs::msg::CompressedImage> &msg,
 
     // Set header timestamp after adjustment
     rclcpp::Time msg_time = rclcpp::Time(msg->header.stamp.sec, msg->header.stamp.nanosec);
-    bridge_image_msg->header.stamp = rclcpp::Time(msg_time.seconds() + time_offset_lidar_camera);
+    bridge_image_msg->header.stamp = rclcpp::Time(msg_time.seconds() + time_offset_lidar_cameras);
 
     
     std::lock_guard<std::mutex> lock(mtx_buffer);
@@ -1067,6 +1058,9 @@ class LaserMappingNode : public rclcpp::Node
 public:
     LaserMappingNode(const rclcpp::NodeOptions& options = rclcpp::NodeOptions()) : Node("laser_mapping", options)
     {
+        init_camera_containers();
+        
+
         this->declare_parameter<bool>("publish.path_en", true);
         this->declare_parameter<bool>("publish.effect_map_en", false);
         this->declare_parameter<bool>("publish.map_en", false);
@@ -1160,25 +1154,25 @@ public:
         this->get_parameter_or<vector<double>>("mapping.extrinsic_R", extrinR, vector<double>());
         // color mapping param
         this->get_parameter_or<int>("camera_number", camera_number, 3);
-        this->get_parameter_or<vector<double>>("color_mapping0.extrinsic_T", extrinT_lc0, vector<double>());
-        this->get_parameter_or<vector<double>>("color_mapping0.extrinsic_R", extrinR_lc0, vector<double>());
-        this->get_parameter_or<vector<double>>("color_mapping0.K_camera", K_camera0, vector<double>());
-        this->get_parameter_or<vector<double>>("color_mapping0.D_camera", D_camera0, vector<double>());
-        this->get_parameter_or<string>("common.camera_topic0", camera_topics[0], "/camera_0_CompressedImage");
-        this->get_parameter_or<double>("color_mapping.time_offset_lidar_to_camera", time_offset_lidar_camera, 0.0);
+        this->get_parameter_or<vector<double>>("color_mapping0.extrinsic_T", extrinsic_t_l2c[0], vector<double>()); // TODO : modify
+        this->get_parameter_or<vector<double>>("color_mapping0.extrinsic_R", extrinsic_r_l2c[0], vector<double>()); // TODO : modify
+        this->get_parameter_or<vector<double>>("color_mapping0.K_camera", K_cameras[0], vector<double>()); // TODO : modify
+        this->get_parameter_or<vector<double>>("color_mapping0.D_camera", D_cameras[0], vector<double>()); // TODO : modify
+        this->get_parameter_or<string>("common.camera_topic0", camera_topics[0], "/camera_0_CompressedImage"); // TODO : modify
+        this->get_parameter_or<double>("color_mapping.time_offset_lidar_to_camera", time_offset_lidar_cameras, 0.0);
 
-        this->get_parameter_or<vector<double>>("color_mapping1.extrinsic_T", extrinT_lc1, vector<double>());
-        this->get_parameter_or<vector<double>>("color_mapping1.extrinsic_R", extrinR_lc1, vector<double>());
-        this->get_parameter_or<vector<double>>("color_mapping1.K_camera", K_camera1, vector<double>());
-        this->get_parameter_or<vector<double>>("color_mapping1.D_camera", D_camera1, vector<double>());
-        this->get_parameter_or<string>("common.camera_topic1", camera_topics[1], "/camera_1_CompressedImage");
+        this->get_parameter_or<vector<double>>("color_mapping1.extrinsic_T", extrinsic_t_l2c[1], vector<double>()); // TODO : modify
+        this->get_parameter_or<vector<double>>("color_mapping1.extrinsic_R", extrinsic_r_l2c[1], vector<double>()); // TODO : modify
+        this->get_parameter_or<vector<double>>("color_mapping1.K_camera", K_cameras[1], vector<double>()); // TODO : modify
+        this->get_parameter_or<vector<double>>("color_mapping1.D_camera", D_cameras[1], vector<double>()); // TODO : modify
+        this->get_parameter_or<string>("common.camera_topic1", camera_topics[1], "/camera_1_CompressedImage"); // TODO : modify
      
 
-        this->get_parameter_or<vector<double>>("color_mapping2.extrinsic_T", extrinT_lc2, vector<double>());
-        this->get_parameter_or<vector<double>>("color_mapping2.extrinsic_R", extrinR_lc2, vector<double>());
-        this->get_parameter_or<vector<double>>("color_mapping2.K_camera", K_camera2, vector<double>());
-        this->get_parameter_or<vector<double>>("color_mapping2.D_camera", D_camera2, vector<double>());
-        this->get_parameter_or<string>("common.camera_topic2", camera_topics[2], "/camera_2_CompressedImage");
+        this->get_parameter_or<vector<double>>("color_mapping2.extrinsic_T", extrinsic_t_l2c[2], vector<double>()); // TODO : modify
+        this->get_parameter_or<vector<double>>("color_mapping2.extrinsic_R", extrinsic_r_l2c[2], vector<double>()); // TODO : modify
+        this->get_parameter_or<vector<double>>("color_mapping2.K_camera", K_cameras[2], vector<double>()); // TODO : modify
+        this->get_parameter_or<vector<double>>("color_mapping2.D_camera", D_cameras[2], vector<double>()); // TODO : modify
+        this->get_parameter_or<string>("common.camera_topic2", camera_topics[2], "/camera_2_CompressedImage"); // TODO : modify
 
         if(cam_num != camera_number)
         {
@@ -1215,24 +1209,24 @@ public:
         Lidar_T_wrt_IMU<<VEC_FROM_ARRAY(extrinT);
         Lidar_R_wrt_IMU<<MAT_FROM_ARRAY(extrinR);
 
-        Camera_T_wrt_Lidar0<<VEC_FROM_ARRAY(extrinT_lc0);
-        Camera_R_wrt_Lidar0<<MAT_FROM_ARRAY(extrinR_lc0);
-        Camera_T_wrt_Lidar1<<VEC_FROM_ARRAY(extrinT_lc1);
-        Camera_R_wrt_Lidar1<<MAT_FROM_ARRAY(extrinR_lc1);
-        Camera_T_wrt_Lidar2<<VEC_FROM_ARRAY(extrinT_lc2);
-        Camera_R_wrt_Lidar2<<MAT_FROM_ARRAY(extrinR_lc2);
+        Camera_T_wrt_Lidar0<<VEC_FROM_ARRAY(extrinsic_t_l2c[0]); // TODO : modify
+        Camera_R_wrt_Lidar0<<MAT_FROM_ARRAY(extrinsic_r_l2c[0]); // TODO : modify
+        Camera_T_wrt_Lidar1<<VEC_FROM_ARRAY(extrinsic_t_l2c[1]); // TODO : modify
+        Camera_R_wrt_Lidar1<<MAT_FROM_ARRAY(extrinsic_r_l2c[1]); // TODO : modify
+        Camera_T_wrt_Lidar2<<VEC_FROM_ARRAY(extrinsic_t_l2c[2]); // TODO : modify
+        Camera_R_wrt_Lidar2<<MAT_FROM_ARRAY(extrinsic_r_l2c[2]); // TODO : modify
 
         // Eigen::Affine3d T_IL = Eigen::Affine3d::Identity();
         // Eigen::Affine3d T_LC = Eigen::Affine3d::Identity();
         T_IL.translation() = Lidar_T_wrt_IMU;
         T_IL.linear() = Lidar_R_wrt_IMU;
 
-        T_LC0.translation() = Camera_T_wrt_Lidar0;
-        T_LC0.linear() = Camera_R_wrt_Lidar0;
-        T_LC1.translation() = Camera_T_wrt_Lidar1;
-        T_LC1.linear() = Camera_R_wrt_Lidar1;
-        T_LC2.translation() = Camera_T_wrt_Lidar2;
-        T_LC2.linear() = Camera_R_wrt_Lidar2;
+        T_LC0.translation() = Camera_T_wrt_Lidar0; // TODO : modify
+        T_LC0.linear() = Camera_R_wrt_Lidar0; // TODO : modify
+        T_LC1.translation() = Camera_T_wrt_Lidar1; // TODO : modify
+        T_LC1.linear() = Camera_R_wrt_Lidar1; // TODO : modify
+        T_LC2.translation() = Camera_T_wrt_Lidar2; // TODO : modify
+        T_LC2.linear() = Camera_R_wrt_Lidar2; // TODO : modify
 
         p_imu->set_extrinsic(Lidar_T_wrt_IMU, Lidar_R_wrt_IMU);
         p_imu->set_gyr_cov(V3D(gyr_cov, gyr_cov, gyr_cov));
@@ -1240,56 +1234,56 @@ public:
         p_imu->set_gyr_bias_cov(V3D(b_gyr_cov, b_gyr_cov, b_gyr_cov));
         p_imu->set_acc_bias_cov(V3D(b_acc_cov, b_acc_cov, b_acc_cov));
 
-        std::shared_ptr<CameraProcess> p_cam0(new CameraProcess());
-        std::shared_ptr<CameraProcess> p_cam1(new CameraProcess());
-        std::shared_ptr<CameraProcess> p_cam2(new CameraProcess());
+        std::shared_ptr<CameraProcess> p_cam0(new CameraProcess()); // TODO : modify
+        std::shared_ptr<CameraProcess> p_cam1(new CameraProcess()); // TODO : modify
+        std::shared_ptr<CameraProcess> p_cam2(new CameraProcess()); // TODO : modify
         // Set extrinsic parameters
-        p_cam0->set_extrinsic(Camera_T_wrt_Lidar0, Camera_R_wrt_Lidar0);
-        p_cam1->set_extrinsic(Camera_T_wrt_Lidar1, Camera_R_wrt_Lidar1);
-        p_cam2->set_extrinsic(Camera_T_wrt_Lidar2, Camera_R_wrt_Lidar2);
+        p_cam0->set_extrinsic(Camera_T_wrt_Lidar0, Camera_R_wrt_Lidar0); // TODO : modify
+        p_cam1->set_extrinsic(Camera_T_wrt_Lidar1, Camera_R_wrt_Lidar1); // TODO : modify
+        p_cam2->set_extrinsic(Camera_T_wrt_Lidar2, Camera_R_wrt_Lidar2); // TODO : modify
 
         // Convert K_camera (std::vector<double>) to Eigen::Matrix3d
-        Eigen::Matrix3d eigen_K0;
-        if (K_camera0.size() == 9) { // Ensure the size is correct
-            eigen_K0 << K_camera0[0], K_camera0[1], K_camera0[2],
-               K_camera0[3], K_camera0[4], K_camera0[5],
-               K_camera0[6], K_camera0[7], K_camera0[8];
+        Eigen::Matrix3d eigen_K0; // TODO : modify
+        if (K_cameras[0].size() == 9) { // Ensure the size is correct
+            eigen_K0 << K_cameras[0][0], K_cameras[0][1], K_cameras[0][2],
+               K_cameras[0][3], K_cameras[0][4], K_cameras[0][5],
+               K_cameras[0][6], K_cameras[0][7], K_cameras[0][8];
         } else {
-            throw std::runtime_error("K_camera0 must have exactly 9 elements");
+            throw std::runtime_error("K_cameras[0] must have exactly 9 elements");
         }
-        Eigen::Matrix3d eigen_K1;
-        if (K_camera1.size() == 9) { // Ensure the size is correct
-            eigen_K1 << K_camera1[0], K_camera1[1], K_camera1[2],
-               K_camera1[3], K_camera1[4], K_camera1[5],
-               K_camera1[6], K_camera1[7], K_camera1[8];
+        Eigen::Matrix3d eigen_K1; // TODO : modify
+        if (K_cameras[1].size() == 9) { // Ensure the size is correct
+            eigen_K1 << K_cameras[1][0], K_cameras[1][1], K_cameras[1][2],
+               K_cameras[1][3], K_cameras[1][4], K_cameras[1][5],
+               K_cameras[1][6], K_cameras[1][7], K_cameras[1][8];
         } else {
-            throw std::runtime_error("K_camera1 must have exactly 9 elements");
+            throw std::runtime_error("K_cameras[1] must have exactly 9 elements");
         }
-        Eigen::Matrix3d eigen_K2;
-        if (K_camera2.size() == 9) { // Ensure the size is correct
-            eigen_K2 << K_camera2[0], K_camera2[1], K_camera2[2],
-               K_camera2[3], K_camera2[4], K_camera2[5],
-               K_camera2[6], K_camera2[7], K_camera2[8];
+        Eigen::Matrix3d eigen_K2; // TODO : modify
+        if (K_cameras[2].size() == 9) { // Ensure the size is correct
+            eigen_K2 << K_cameras[2][0], K_cameras[2][1], K_cameras[2][2],
+               K_cameras[2][3], K_cameras[2][4], K_cameras[2][5],
+               K_cameras[2][6], K_cameras[2][7], K_cameras[2][8];
         } else {
-            throw std::runtime_error("K_camera2 must have exactly 9 elements");
+            throw std::runtime_error("K_cameras[2] must have exactly 9 elements");
         }
-        p_cam0->set_K(eigen_K0);
-        p_cam1->set_K(eigen_K1);
-        p_cam2->set_K(eigen_K2);
+        p_cam0->set_K(eigen_K0); // TODO : modify
+        p_cam1->set_K(eigen_K1); // TODO : modify
+        p_cam2->set_K(eigen_K2); // TODO : modify
 
         // Convert D_camera (std::vector<double>) to Eigen::VectorXd
-        Eigen::VectorXd eigen_D0 = Eigen::VectorXd::Map(D_camera0.data(), D_camera0.size());
-        Eigen::VectorXd eigen_D1 = Eigen::VectorXd::Map(D_camera1.data(), D_camera1.size());
-        Eigen::VectorXd eigen_D2 = Eigen::VectorXd::Map(D_camera2.data(), D_camera2.size());
+        Eigen::VectorXd eigen_D0 = Eigen::VectorXd::Map(D_cameras[0].data(), D_cameras[0].size()); // TODO : modify
+        Eigen::VectorXd eigen_D1 = Eigen::VectorXd::Map(D_cameras[1].data(), D_cameras[1].size()); // TODO : modify
+        Eigen::VectorXd eigen_D2 = Eigen::VectorXd::Map(D_cameras[2].data(), D_cameras[2].size()); // TODO : modify
 
-        p_cam0->set_D(eigen_D0);
-        p_cam1->set_D(eigen_D1);
-        p_cam2->set_D(eigen_D2);
+        p_cam0->set_D(eigen_D0); // TODO : modify
+        p_cam1->set_D(eigen_D1); // TODO : modify
+        p_cam2->set_D(eigen_D2); // TODO : modify
 
         // Set the time offset
-        p_cam0->set_time_offset(time_offset_lidar_camera);
-        p_cam1->set_time_offset(time_offset_lidar_camera);
-        p_cam2->set_time_offset(time_offset_lidar_camera);
+        p_cam0->set_time_offset(time_offset_lidar_cameras); // TODO : modify
+        p_cam1->set_time_offset(time_offset_lidar_cameras); // TODO : modify
+        p_cam2->set_time_offset(time_offset_lidar_cameras); // TODO : modify
         
 
         fill(epsi, epsi+23, 0.001);
@@ -1324,18 +1318,18 @@ public:
 
 
 
-        sub_image_0 = this->create_subscription<sensor_msgs::msg::CompressedImage>(
-    camera_topics[0], rclcpp::QoS(10), [this](const sensor_msgs::msg::CompressedImage::SharedPtr msg) {
-        camera_cbk(msg, Measures.images[0]);
-    });
-    sub_image_1 = this->create_subscription<sensor_msgs::msg::CompressedImage>(
-    camera_topics[1], rclcpp::QoS(10), [this](const sensor_msgs::msg::CompressedImage::SharedPtr msg) {
-        camera_cbk(msg, Measures.images[1]);
-    });
-    sub_image_2 = this->create_subscription<sensor_msgs::msg::CompressedImage>(
-    camera_topics[2], rclcpp::QoS(10), [this](const sensor_msgs::msg::CompressedImage::SharedPtr msg) {
-        camera_cbk(msg, Measures.images[2]);
-    });
+            sub_image_0 = this->create_subscription<sensor_msgs::msg::CompressedImage>( // TODO : modify
+        camera_topics[0], rclcpp::QoS(10), [this](const sensor_msgs::msg::CompressedImage::SharedPtr msg) {
+            camera_cbk(msg, Measures.images[0]);
+        });
+        sub_image_1 = this->create_subscription<sensor_msgs::msg::CompressedImage>( // TODO : modify
+        camera_topics[1], rclcpp::QoS(10), [this](const sensor_msgs::msg::CompressedImage::SharedPtr msg) {
+            camera_cbk(msg, Measures.images[1]);
+        });
+        sub_image_2 = this->create_subscription<sensor_msgs::msg::CompressedImage>( // TODO : modify
+        camera_topics[2], rclcpp::QoS(10), [this](const sensor_msgs::msg::CompressedImage::SharedPtr msg) {
+            camera_cbk(msg, Measures.images[2]);
+        });
 
 
     
@@ -1369,7 +1363,16 @@ public:
     }
 
 private:
-    
+    void init_camera_containers()
+    {
+        for(int i = 0; i < cam_num; i++){
+            extrinsic_t_l2c[i] = std::vector<double>(3, 0.0);
+            extrinsic_r_l2c[i] = std::vector<double>(9, 0.0);
+            K_cameras[i] = std::vector<double>(9, 0.0);
+            D_cameras[i] = std::vector<double>(5, 0.0);
+        }
+
+    }
     void timer_callback()
     {
         if(sync_packages(Measures))
@@ -1569,15 +1572,15 @@ private:
                 pcl::PointCloud<pcl::PointXYZRGB>::Ptr combined_pc_color(new pcl::PointCloud<pcl::PointXYZRGB>());
 
                 
-                generateColorMap(Measures.images[0], state_camera0, state_lidar, feats_down_body, pc_color0, K_camera0, D_camera0);
+                generateColorMap(Measures.images[0], state_camera0, state_lidar, feats_down_body, pc_color0, K_cameras[0], D_cameras[0]);
                 pcl::transformPointCloud(*pc_color0, *pc_color0, state_lidar.matrix());
                 *combined_pc_color += *pc_color0;
 
-                generateColorMap(Measures.images[1], state_camera1, state_lidar, feats_down_body, pc_color1, K_camera1, D_camera1);
+                generateColorMap(Measures.images[1], state_camera1, state_lidar, feats_down_body, pc_color1, K_cameras[1], D_cameras[1]);
                 pcl::transformPointCloud(*pc_color1, *pc_color1, state_lidar.matrix());
                 *combined_pc_color += *pc_color1;
 
-                generateColorMap(Measures.images[2], state_camera2, state_lidar, feats_down_body, pc_color2, K_camera2, D_camera2);
+                generateColorMap(Measures.images[2], state_camera2, state_lidar, feats_down_body, pc_color2, K_cameras[2], D_cameras[2]);
                 pcl::transformPointCloud(*pc_color2, *pc_color2, state_lidar.matrix());
                 *combined_pc_color += *pc_color2;
 
@@ -1676,9 +1679,9 @@ private:
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pubOdomAftMapped_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubPath_;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu_;
-    rclcpp::Subscription<sensor_msgs::msg::CompressedImage>::SharedPtr sub_image_0;
-    rclcpp::Subscription<sensor_msgs::msg::CompressedImage>::SharedPtr sub_image_1;
-    rclcpp::Subscription<sensor_msgs::msg::CompressedImage>::SharedPtr sub_image_2;
+    rclcpp::Subscription<sensor_msgs::msg::CompressedImage>::SharedPtr sub_image_0; // TODO : into container
+    rclcpp::Subscription<sensor_msgs::msg::CompressedImage>::SharedPtr sub_image_1; // TODO : into container
+    rclcpp::Subscription<sensor_msgs::msg::CompressedImage>::SharedPtr sub_image_2; // TODO : into container
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_pcl_pc_;
 #ifdef USE_LIVOX
     rclcpp::Subscription<livox_ros_driver2::msg::CustomMsg>::SharedPtr sub_pcl_livox_;
