@@ -101,10 +101,12 @@ string map_file_path, lid_topic, imu_topic;
 std::array<std::string, cam_num> camera_topics;
 
 double res_mean_last = 0.05, total_residual = 0.0;
-double last_timestamp_lidar = 0, last_timestamp_imu = -1.0, last_timestamp_camera = -1.0;
+double last_timestamp_lidar = 0, last_timestamp_imu = -1.0;
+std::array<double, cam_num> last_timestamp_cameras;
 double gyr_cov = 0.1, acc_cov = 0.1, b_gyr_cov = 0.0001, b_acc_cov = 0.0001;
 double filter_size_corner_min = 0, filter_size_surf_min = 0, filter_size_map_min = 0, fov_deg = 0;
-double cube_len = 0, HALF_FOV_COS = 0, FOV_DEG = 0, total_distance = 0, lidar_end_time = 0, first_lidar_time = 0.0;
+double cube_len = 0, HALF_FOV_COS = 0, FOV_DEG = 0, total_distance = 0, lidar_end_time = 0, first_lidar_time = 0.0, camera_time = 0.0;
+double LIDAR_SCAN_DURATION = 0.0;
 int    effct_feat_num = 0, time_log_counter = 0, scan_count = 0, publish_count = 0;
 int    iterCount = 0, feats_down_size = 0, NUM_MAX_ITERATIONS = 0, laserCloudValidNum = 0, pcd_save_interval = -1, pcd_index = 0;
 bool   point_selected_surf[100000] = {0};
@@ -118,11 +120,10 @@ vector<PointVector>  Nearest_Points;
 vector<double>       extrinT(3, 0.0);
 vector<double>       extrinR(9, 0.0);
 
-deque<double>                     time_buffer;
+deque<double>                     lidar_time_buffer;
 deque<PointCloudXYZI::Ptr>        lidar_buffer;
 deque<sensor_msgs::msg::Imu::ConstSharedPtr> imu_buffer;
-// std::array<deque<sensor_msgs::msg::Image::SharedPtr>, cam_num> camera_buffers; // TODO : need for sync_packages
-std::array<deque<double>, cam_num> camera_time_buffers;
+std::array<deque<sensor_msgs::msg::Image::SharedPtr>, cam_num> camera_buffers;
 
 
 
@@ -316,8 +317,15 @@ void lasermap_fov_segment()
 
 
 void camera_cbk(const std::shared_ptr<sensor_msgs::msg::CompressedImage> &msg,
-                sensor_msgs::msg::Image::SharedPtr &image_ptr)
+                int cam_index)
 {
+    double timestamp = get_time_sec(msg->header.stamp);
+    if(timestamp < last_timestamp_cameras[cam_index])
+    {
+        std::cerr << "camera loop back, clear buffer" << std::endl;
+        camera_buffers[cam_index].clear();
+    }
+    last_timestamp_cameras[cam_index] = timestamp;
     // Decode the compressed image
     cv::Mat image = cv::imdecode(cv::Mat(msg->data), cv::IMREAD_COLOR); // Decompress
     if (image.empty())
@@ -327,28 +335,16 @@ void camera_cbk(const std::shared_ptr<sensor_msgs::msg::CompressedImage> &msg,
     }
 
     // Convert OpenCV image to ROS sensor_msgs::msg::Image
-    auto bridge_image_msg = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", image).toImageMsg();
+    auto ros_image_msg = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", image).toImageMsg();
 
     // Set header timestamp after adjustment
-    rclcpp::Time msg_time = rclcpp::Time(msg->header.stamp.sec, msg->header.stamp.nanosec);
-    bridge_image_msg->header.stamp = rclcpp::Time(msg_time.seconds() + time_offset_lidar_cameras);
+    ros_image_msg->header.stamp = rclcpp::Time(msg->header.stamp.sec, msg->header.stamp.nanosec+ time_offset_lidar_cameras);
 
-    
     std::lock_guard<std::mutex> lock(mtx_buffer);
 
-    camera_time_buffers[0].clear(); // TODO : need for sync_packages
-
-    // Update the parameter with the processed image
-    image_ptr = bridge_image_msg;
-
     // Update the measurement and buffer
-    Measures.match_camera_time = get_time_sec(image_ptr->header.stamp);
-    last_timestamp_camera = Measures.match_camera_time;
-    // camera_buffer.push_back(image_ptr);
-    camera_time_buffers[0].push_back(Measures.match_camera_time); // TODO : need for sync_packages
+    camera_buffers[cam_index].push_back(ros_image_msg);
     
-
-
     // Notify waiting threads
     sig_buffer.notify_all();
 }
@@ -357,15 +353,15 @@ void standard_pcl_cbk(const sensor_msgs::msg::PointCloud2::UniquePtr msg)
 {
     mtx_buffer.lock();
     scan_count ++;
-    double cur_time = get_time_sec(msg->header.stamp);
+    double timestamp = get_time_sec(msg->header.stamp);
     double preprocess_start_time = omp_get_wtime();
 
-    //lidar_buffer.clear(); -> 메모리랑 상관 x
-    if (!is_first_lidar && cur_time < last_timestamp_lidar)
+    if (!is_first_lidar && timestamp < last_timestamp_lidar)
     {
         std::cerr << "lidar loop back, clear buffer" << std::endl;
         lidar_buffer.clear();
     }
+    last_timestamp_lidar = timestamp;
     if (is_first_lidar)
     {
         is_first_lidar = false;
@@ -374,8 +370,8 @@ void standard_pcl_cbk(const sensor_msgs::msg::PointCloud2::UniquePtr msg)
     PointCloudXYZI::Ptr  ptr(new PointCloudXYZI());
     p_pre->process(msg, ptr);
     lidar_buffer.push_back(ptr);
-    time_buffer.push_back(cur_time);
-    last_timestamp_lidar = cur_time;
+    lidar_time_buffer.push_back(timestamp);
+    
     s_plot11[scan_count] = omp_get_wtime() - preprocess_start_time;
     mtx_buffer.unlock();
     sig_buffer.notify_all();
@@ -455,12 +451,9 @@ void imu_cbk(const sensor_msgs::msg::Imu::UniquePtr msg_in)
     sig_buffer.notify_all();
 }
 
-
-
-
 double lidar_mean_scantime = 0.0;
 int    scan_num = 0;
-
+double lidar_beg_time = 0.0;
 #ifndef ISAAC_SIM
 bool sync_packages(MeasureGroup &meas)
 {
@@ -472,7 +465,7 @@ bool sync_packages(MeasureGroup &meas)
     if(!lidar_pushed)
     {
         meas.lidar = lidar_buffer.front();
-        meas.lidar_beg_time = time_buffer.front();
+        meas.lidar_beg_time = lidar_time_buffer.front();
         if (meas.lidar->points.size() <= 1) // time too little
         {
             lidar_end_time = meas.lidar_beg_time + lidar_mean_scantime;
@@ -506,8 +499,7 @@ bool sync_packages(MeasureGroup &meas)
     /*** push imu data, and pop from imu buffer ***/
     double imu_time = get_time_sec(imu_buffer.front()->header.stamp);
     meas.imu.clear();
-    // meas.image = camera_buffer.front(); // TODO : wrong camera buffer
-    meas.match_camera_time  = get_time_sec(meas.image->header.stamp);
+    // meas.image = camera_buffers.front(); // TODO : wrong camera buffer
 
     while ((!imu_buffer.empty()) && (imu_time < lidar_end_time))
     {
@@ -517,28 +509,60 @@ bool sync_packages(MeasureGroup &meas)
         imu_buffer.pop_front();
     }
     // Pop the matched image from the buffer
-    camera_time_buffers[0].pop_front(); // TODO : need for sync_packages
-    // camera_buffer.pop_front();
+    // camera_buffers.pop_front();
     lidar_buffer.pop_front();
-    time_buffer.pop_front();
+    lidar_time_buffer.pop_front();
     lidar_pushed = false;
     return true;
 }
 #else
-bool sync_packages(MeasureGroup &meas)
+bool sync_lidar_camera(const double& lidar_start_time)  // period of LiDAR and camera must be same!
 {
-    if (lidar_buffer.empty() || imu_buffer.empty()) 
+    double time_diff = 0.0;
+    bool is_synced = true;
+    for(int cam_index = 0; cam_index < cam_num; cam_index++)
     {
-        return false;
-    }
+        // std::cout << "camera_buffers[cam_index].front()->header.stamp : " << camera_buffers[cam_index].front()->header.stamp << endl;
+        camera_time = get_time_sec(camera_buffers[cam_index].front()->header.stamp);
+        time_diff = camera_time - lidar_start_time;
+        if (time_diff > LIDAR_SCAN_DURATION) // LiDAR time is ahead of camera time
+        {
+            int iter = time_diff / LIDAR_SCAN_DURATION;
+            // cout << "Time difference between LiDAR and Camera is " << time_diff << endl;
+            // cout << "Drop single LiDAR scan, sync_lidar_camera not synced" << endl;
 
-    lidar_end_time = time_buffer[0]; //lidar timestamp is EOF time
+            lidar_buffer.pop_front();
+            lidar_time_buffer.pop_front();
+            is_synced = false;
+            continue;
+        }
+        else if(time_diff < -LIDAR_SCAN_DURATION)  // camera time is ahead of LiDAR time
+        {
+            int iter = -time_diff / LIDAR_SCAN_DURATION;
+            // cout << "Time difference between LiDAR and Camera is " << time_diff << endl;
+            // cout << "Drop " << iter << " frames, cam index : " << cam_index << " Camera scan, sync_lidar_camera not synced" << endl;
+            for(int i = 0; i < iter; i++)
+            {
+                camera_buffers[cam_index].pop_front();
+            }
+            is_synced = false;
+        }
+    }
+    return is_synced;
+}
+
+bool sync_lidar_imu(double lidar_end_time)
+{
     auto imu_first_time = get_time_sec(imu_buffer.front()->header.stamp);
-    if (imu_first_time > lidar_end_time)
+    if (lidar_end_time < imu_first_time)
     {
         // drop lidar scan until we get IMU readings
         lidar_buffer.pop_front();
-        time_buffer.pop_front();
+        for(int cam_index = 0; cam_index < cam_num; cam_index++)
+        {
+            camera_buffers[cam_index].pop_front();
+        }
+        lidar_time_buffer.pop_front();
         return false;
     }
 
@@ -547,14 +571,41 @@ bool sync_packages(MeasureGroup &meas)
     {
         return false;
     }
+    return true;
+}
 
+bool sync_packages(MeasureGroup &meas)
+{
+    if (lidar_buffer.empty() || imu_buffer.empty())
+    {
+        return false;
+    }
+    for(int i=0; i<cam_num; i++)
+    {
+        if(camera_buffers[i].empty())
+        {
+            return false;
+        }
+    }
+
+    lidar_end_time = lidar_time_buffer.front(); //lidar timestamp is EOF time
+    lidar_beg_time = lidar_end_time - LIDAR_SCAN_DURATION;
+    if((sync_lidar_camera(lidar_beg_time) && sync_lidar_imu(lidar_end_time)) != true)
+    {
+        return false;
+    }
     // sync'ed
-    auto scan_time = 1.0/p_pre->SCAN_RATE;
     meas.lidar = lidar_buffer.front();
     meas.lidar_end_time = lidar_end_time;
-    meas.lidar_beg_time = lidar_end_time - scan_time;
+    meas.lidar_beg_time = lidar_beg_time;
+    for(int cam_index = 0; cam_index < cam_num; cam_index++)
+    {
+        meas.images[cam_index] = camera_buffers[cam_index].front();
+        camera_buffers[cam_index].pop_front();
+    }
+
     lidar_buffer.pop_front();
-    time_buffer.pop_front();
+    lidar_time_buffer.pop_front();
  
     meas.imu.clear();
     while (!imu_buffer.empty())
@@ -570,7 +621,6 @@ bool sync_packages(MeasureGroup &meas)
             imu_buffer.pop_front();
         }
     }
-    
     // if (meas.imu.size() != 40)
     // {
     //     cerr << "Error:"
@@ -585,8 +635,6 @@ bool sync_packages(MeasureGroup &meas)
     return true;
 }
 #endif
-
-
 
 
 int process_increments = 0;
@@ -1016,6 +1064,8 @@ public:
     {
         init_camera_containers();
         load_camera_parameters();
+        LIDAR_SCAN_DURATION = 1.0/p_pre->SCAN_RATE;
+
 
         if(cam_num != camera_number)
         {
@@ -1128,7 +1178,7 @@ public:
         for(int i=0; i < cam_num; i++){
             sub_images[i] = this->create_subscription<sensor_msgs::msg::CompressedImage>(
                 camera_topics[i], rclcpp::QoS(10), [this, i](const sensor_msgs::msg::CompressedImage::SharedPtr msg) {
-                    camera_cbk(msg, Measures.images[i]);
+                    camera_cbk(msg, i);
                 });
         }
 
@@ -1428,9 +1478,8 @@ private:
             //output_msg.header.stamp = rclcpp::Clock().now(); // Ensure timestamp consistency
             output_msg.header.frame_id = "camera_init"; // Adjust frame as needed
 
-
-            if (!camera_time_buffers[0].empty()) { // TODO : need for sync_packages
-                output_msg.header.stamp = get_ros_time(camera_time_buffers[0].front()); // TODO : need for sync_packages
+            if (!camera_buffers[0].empty()) {
+                output_msg.header.stamp = camera_buffers[0].front()->header.stamp;
                 pubColorMap_->publish(output_msg);
                 // RCLCPP_INFO(this->get_logger(), "Published colorized point cloud with %lu points.", combined_pc_color->points.size());
             } 

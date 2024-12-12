@@ -355,11 +355,9 @@ void ImuProcess::UndistortPcl_isaac(const MeasureGroup &meas, esekfom::esekf<sta
   const double &imu_end_time = rclcpp::Time(v_imu.back()->header.stamp).seconds();
   const double &pcl_beg_time = meas.lidar_beg_time;
   const double &pcl_end_time = meas.lidar_end_time;
-
   /*** sort point clouds by offset time ***/
   pcl_out = *(meas.lidar);
   sort(pcl_out.points.begin(), pcl_out.points.end(), time_list);
-
   /*** Initialize IMU pose ***/
   Pose6D last_pose;
   if (IMUpose.empty())
@@ -373,7 +371,6 @@ void ImuProcess::UndistortPcl_isaac(const MeasureGroup &meas, esekfom::esekf<sta
   last_pose.offset_time = 0.0;
   IMUpose.clear();
   IMUpose.push_back(last_pose);
-
   /*** forward propagation at each imu point ***/
   double dt = rclcpp::Time(v_imu[1]->header.stamp).seconds() - rclcpp::Time(v_imu[0]->header.stamp).seconds();
   input_ikfom in;
@@ -398,7 +395,6 @@ void ImuProcess::UndistortPcl_isaac(const MeasureGroup &meas, esekfom::esekf<sta
     double time_offset = imu_time - pcl_beg_time;
     IMUpose.push_back(set_pose6d(time_offset, accel_world, gyro, imu_state.vel, imu_state.pos, imu_state.rot.toRotationMatrix()));
   }
-
   /*** undistort each lidar point (backward propagation) ***/
   V3D last_position = VEC3D_FROM_ARRAY(IMUpose.back().pos);
   M3D last_rotation = MAT3D_FROM_ARRAY(IMUpose.back().rot);
@@ -441,6 +437,7 @@ void ImuProcess::UndistortPcl_isaac(const MeasureGroup &meas, esekfom::esekf<sta
     }
   }
 }
+
 #endif
 
 void ImuProcess::Process(const MeasureGroup &meas,  esekfom::esekf<state_ikfom, 12, input_ikfom> &kf_state, PointCloudXYZI::Ptr cur_pcl_un_)
@@ -492,7 +489,6 @@ void ImuProcess::Process(const MeasureGroup &meas,  esekfom::esekf<state_ikfom, 
     init_state.pos = Zero3d;
     kf_state.change_x(init_state);
   }
-
   UndistortPcl_isaac(meas, kf_state, *cur_pcl_un_);
 #endif
 
