@@ -326,6 +326,7 @@ void camera_cbk(const std::shared_ptr<sensor_msgs::msg::CompressedImage> &msg,
         camera_buffers[cam_index].clear();
     }
     last_timestamp_cameras[cam_index] = timestamp;
+    mtx_buffer.lock();
     // Decode the compressed image
     cv::Mat image = cv::imdecode(cv::Mat(msg->data), cv::IMREAD_COLOR); // Decompress
     if (image.empty())
@@ -340,10 +341,10 @@ void camera_cbk(const std::shared_ptr<sensor_msgs::msg::CompressedImage> &msg,
     // Set header timestamp after adjustment
     ros_image_msg->header.stamp = rclcpp::Time(msg->header.stamp.sec, msg->header.stamp.nanosec+ time_offset_lidar_cameras);
 
-    std::lock_guard<std::mutex> lock(mtx_buffer);
 
     // Update the measurement and buffer
     camera_buffers[cam_index].push_back(ros_image_msg);
+    mtx_buffer.unlock();
     
     // Notify waiting threads
     sig_buffer.notify_all();
@@ -525,9 +526,9 @@ bool sync_lidar_camera(const double& lidar_start_time)  // period of LiDAR and c
         // std::cout << "camera_buffers[cam_index].front()->header.stamp : " << camera_buffers[cam_index].front()->header.stamp << endl;
         camera_time = get_time_sec(camera_buffers[cam_index].front()->header.stamp);
         time_diff = camera_time - lidar_start_time;
-        if (time_diff > LIDAR_SCAN_DURATION) // LiDAR time is ahead of camera time
+        if (time_diff >= LIDAR_SCAN_DURATION - 0.01) // LiDAR time is ahead of camera time
         {
-            int iter = time_diff / LIDAR_SCAN_DURATION;
+            int iter = time_diff / (LIDAR_SCAN_DURATION - 0.01);
             cout << "\nTime difference between LiDAR and Camera is " << time_diff << endl;
             cout << "Drop single LiDAR scan, sync_lidar_camera not synced\n" << endl;
             for(int i = 0; i < iter; i++)
@@ -541,9 +542,9 @@ bool sync_lidar_camera(const double& lidar_start_time)  // period of LiDAR and c
             is_synced = false;
             continue;
         }
-        else if(time_diff < -LIDAR_SCAN_DURATION)  // camera time is ahead of LiDAR time
+        else if(time_diff <= -(LIDAR_SCAN_DURATION - 0.01))  // camera time is ahead of LiDAR time
         {
-            int iter = -time_diff / LIDAR_SCAN_DURATION;
+            int iter = -time_diff / (LIDAR_SCAN_DURATION - 0.01);
             // cout << "Time difference between LiDAR and Camera is " << time_diff << endl;
             // cout << "Drop " << iter << " frames, cam index : " << cam_index << " Camera scan, sync_lidar_camera not synced" << endl;
             for(int i = 0; i < iter; i++)
@@ -1263,7 +1264,7 @@ private:
         this->declare_parameter<bool>("mapping.extrinsic_est_en", true);
         this->declare_parameter<bool>("pcd_save.pcd_save_en", false);
         this->declare_parameter<int>("pcd_save.interval", -1);
-        this->declare_parameter<int>("camera_number", 3);
+        this->declare_parameter<int>("camera_number", cam_num);
         this->declare_parameter<vector<double>>("mapping.extrinsic_T", vector<double>());
         this->declare_parameter<vector<double>>("mapping.extrinsic_R", vector<double>());
         this->declare_parameter<double>("color_mapping.time_offset_lidar_to_camera", 0.0);
@@ -1305,7 +1306,7 @@ private:
         this->get_parameter_or<vector<double>>("mapping.extrinsic_R", extrinR, vector<double>());
         
         // color mapping param
-        this->get_parameter_or<int>("common.camera_number", camera_number, 3);
+        this->get_parameter_or<int>("common.camera_number", camera_number, cam_num);
         this->get_parameter_or<double>("color_mapping.time_offset_lidar_to_camera", time_offset_lidar_cameras, 0.0);
         
         for (size_t i = 0; i < camera_number; ++i) {
