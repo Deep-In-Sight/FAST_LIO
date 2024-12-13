@@ -520,7 +520,7 @@ bool sync_lidar_camera(const double& lidar_start_time)  // period of LiDAR and c
 {
     double time_diff = 0.0;
     bool is_synced = true;
-    for(int cam_index = 0; cam_index < cam_num; cam_index++)
+    for(int cam_index = 0; cam_index < camera_number; cam_index++)
     {
         // std::cout << "camera_buffers[cam_index].front()->header.stamp : " << camera_buffers[cam_index].front()->header.stamp << endl;
         camera_time = get_time_sec(camera_buffers[cam_index].front()->header.stamp);
@@ -566,7 +566,7 @@ bool sync_lidar_imu(double lidar_end_time)
     {
         // drop lidar scan until we get IMU readings
         lidar_buffer.pop_front();
-        for(int cam_index = 0; cam_index < cam_num; cam_index++)
+        for(int cam_index = 0; cam_index < camera_number; cam_index++)
         {
             camera_buffers[cam_index].pop_front();
         }
@@ -588,7 +588,7 @@ bool sync_packages(MeasureGroup &meas)
     {
         return false;
     }
-    for(int i=0; i<cam_num; i++)
+    for(int i = 0; i < camera_number; i++)
     {
         if(camera_buffers[i].empty())
         {
@@ -606,7 +606,7 @@ bool sync_packages(MeasureGroup &meas)
     meas.lidar = lidar_buffer.front();
     meas.lidar_end_time = lidar_end_time;
     meas.lidar_beg_time = lidar_beg_time;
-    for(int cam_index = 0; cam_index < cam_num; cam_index++)
+    for(int cam_index = 0; cam_index < camera_number; cam_index++)
     {
         meas.images[cam_index] = camera_buffers[cam_index].front();
         camera_buffers[cam_index].pop_front();
@@ -1075,10 +1075,11 @@ public:
         LIDAR_SCAN_DURATION = 1.0/p_pre->SCAN_RATE;
 
 
-        if(cam_num != camera_number)
+        if(cam_num < camera_number)
         {
             RCLCPP_WARN(this->get_logger(), "Wrong number of camera.\n please check config file or const int cam_num\n");
-
+            exit(0);
+            return;
         }
 
 
@@ -1113,7 +1114,7 @@ public:
         std::array<Eigen::Matrix3d, cam_num> eigen_Ks;
         std::array<Eigen::VectorXd, cam_num> eigen_Ds;
 
-        for (size_t i = 0; i < cam_num; ++i) {
+        for (size_t i = 0; i < camera_number; ++i) {
             // Extrinsic parameters
             
 
@@ -1183,7 +1184,7 @@ public:
         sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic, rclcpp::SensorDataQoS().keep_all(), imu_cbk);
 
 
-        for(int i=0; i < cam_num; i++){
+        for(int i=0; i < camera_number; i++){
             sub_images[i] = this->create_subscription<sensor_msgs::msg::CompressedImage>(
                 camera_topics[i], rclcpp::QoS(10), [this, i](const sensor_msgs::msg::CompressedImage::SharedPtr msg) {
                     camera_cbk(msg, i);
@@ -1219,7 +1220,7 @@ public:
 private:
     void init_camera_containers()
     {
-        for(int i = 0; i < cam_num; i++){
+        for(int i = 0; i < camera_number; i++){
             extrinsic_t_l2c[i] = std::vector<double>(3, 0.0);
             extrinsic_r_l2c[i] = std::vector<double>(9, 0.0);
             K_cameras[i] = std::vector<double>(9, 0.0);
@@ -1262,7 +1263,7 @@ private:
         this->declare_parameter<bool>("mapping.extrinsic_est_en", true);
         this->declare_parameter<bool>("pcd_save.pcd_save_en", false);
         this->declare_parameter<int>("pcd_save.interval", -1);
-        this->declare_parameter<int>("camera_number", cam_num);
+        this->declare_parameter<int>("camera_number", 3);
         this->declare_parameter<vector<double>>("mapping.extrinsic_T", vector<double>());
         this->declare_parameter<vector<double>>("mapping.extrinsic_R", vector<double>());
         this->declare_parameter<double>("color_mapping.time_offset_lidar_to_camera", 0.0);
@@ -1304,7 +1305,7 @@ private:
         this->get_parameter_or<vector<double>>("mapping.extrinsic_R", extrinR, vector<double>());
         
         // color mapping param
-        this->get_parameter_or<int>("camera_number", camera_number, 3);
+        this->get_parameter_or<int>("common.camera_number", camera_number, 3);
         this->get_parameter_or<double>("color_mapping.time_offset_lidar_to_camera", time_offset_lidar_cameras, 0.0);
         
         for (size_t i = 0; i < camera_number; ++i) {
@@ -1470,7 +1471,7 @@ private:
 
             pcl::PointCloud<pcl::PointXYZRGB>::Ptr color_pointcloud(new pcl::PointCloud<pcl::PointXYZRGB>());
 
-            for(int i = 0; i < cam_num; i++){
+            for(int i = 0; i < camera_number; i++){
                 if(Measures.images[i] != nullptr && Measures.images[i]->data.empty() == false){
                     pcl::PointCloud<pcl::PointXYZRGB>::Ptr single_cam_pointcloud = std::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
 
@@ -1482,19 +1483,15 @@ private:
             }
 
             sensor_msgs::msg::PointCloud2 output_msg;
-            pcl::toROSMsg(*color_pointcloud, output_msg);
+            if(color_pointcloud == nullptr || color_pointcloud->empty())
+                pcl::toROSMsg(*feats_down_world, output_msg);
+            else
+                pcl::toROSMsg(*color_pointcloud, output_msg);
             //output_msg.header.stamp = rclcpp::Clock().now(); // Ensure timestamp consistency
             output_msg.header.frame_id = "camera_init"; // Adjust frame as needed
-
-            if (!camera_buffers[0].empty()) {
-                output_msg.header.stamp = camera_buffers[0].front()->header.stamp;
-                pubColorMap_->publish(output_msg);
-                // RCLCPP_INFO(this->get_logger(), "Published colorized point cloud with %lu points.", combined_pc_color->points.size());
-            } 
-            else {
-                RCLCPP_ERROR(this->get_logger(), "camera_time_buffer is empty. Skipping publish.");
-            }
-
+            output_msg.header.stamp = rclcpp::Time(lidar_end_time);
+            pubColorMap_->publish(output_msg);
+            
                 
             state_point_last = kf.get_x();
 
