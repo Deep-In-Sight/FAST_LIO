@@ -528,11 +528,16 @@ bool sync_lidar_camera(const double& lidar_start_time)  // period of LiDAR and c
         if (time_diff > LIDAR_SCAN_DURATION) // LiDAR time is ahead of camera time
         {
             int iter = time_diff / LIDAR_SCAN_DURATION;
-            // cout << "Time difference between LiDAR and Camera is " << time_diff << endl;
-            // cout << "Drop single LiDAR scan, sync_lidar_camera not synced" << endl;
-
-            lidar_buffer.pop_front();
-            lidar_time_buffer.pop_front();
+            cout << "\nTime difference between LiDAR and Camera is " << time_diff << endl;
+            cout << "Drop single LiDAR scan, sync_lidar_camera not synced\n" << endl;
+            for(int i = 0; i < iter; i++)
+            {
+                if(!lidar_buffer.empty())
+                {
+                    lidar_buffer.pop_front();
+                    lidar_time_buffer.pop_front();
+                }
+            }
             is_synced = false;
             continue;
         }
@@ -543,7 +548,10 @@ bool sync_lidar_camera(const double& lidar_start_time)  // period of LiDAR and c
             // cout << "Drop " << iter << " frames, cam index : " << cam_index << " Camera scan, sync_lidar_camera not synced" << endl;
             for(int i = 0; i < iter; i++)
             {
-                camera_buffers[cam_index].pop_front();
+                if(!camera_buffers[cam_index].empty())
+                {
+                    camera_buffers[cam_index].pop_front();
+                }
             }
             is_synced = false;
         }
