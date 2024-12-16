@@ -149,6 +149,10 @@ install(TARGETS fastlio_color
   DESTINATION lib/${PROJECT_NAME}
 )
 
+install(TARGETS synchronizer
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 install(
   DIRECTORY config launch rviz
   DESTINATION share/${PROJECT_NAME}
