@@ -123,7 +123,11 @@ vector<double>       extrinR(9, 0.0);
 deque<double>                     lidar_time_buffer;
 deque<PointCloudXYZI::Ptr>        lidar_buffer;
 deque<sensor_msgs::msg::Imu::ConstSharedPtr> imu_buffer;
+#ifdef ISAAC_SIM
+std::array<deque<sensor_msgs::msg::CompressedImage::SharedPtr>, cam_num> camera_buffers;
+#else
 std::array<deque<sensor_msgs::msg::Image::SharedPtr>, cam_num> camera_buffers;
+#endif
 
 
 
@@ -315,9 +319,13 @@ void lasermap_fov_segment()
 }
 
 
-
+#ifdef ISAAC_SIM
 void camera_cbk(const std::shared_ptr<sensor_msgs::msg::CompressedImage> &msg,
                 int cam_index)
+#else
+void camera_cbk(const std::shared_ptr<sensor_msgs::msg::Image> &msg,
+                int cam_index)
+#endif
 {
     double timestamp = get_time_sec(msg->header.stamp);
     if(timestamp < last_timestamp_cameras[cam_index])
@@ -327,23 +335,8 @@ void camera_cbk(const std::shared_ptr<sensor_msgs::msg::CompressedImage> &msg,
     }
     last_timestamp_cameras[cam_index] = timestamp;
     mtx_buffer.lock();
-    // Decode the compressed image
-    cv::Mat image = cv::imdecode(cv::Mat(msg->data), cv::IMREAD_COLOR); // Decompress
-    if (image.empty())
-    {
-        RCLCPP_ERROR(rclcpp::get_logger("camera_cbk"), "Failed to decode image");
-        return;
-    }
+    camera_buffers[cam_index].push_back(msg);    
 
-    // Convert OpenCV image to ROS sensor_msgs::msg::Image
-    auto ros_image_msg = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", image).toImageMsg();
-
-    // Set header timestamp after adjustment
-    ros_image_msg->header.stamp = rclcpp::Time(msg->header.stamp.sec, msg->header.stamp.nanosec+ time_offset_lidar_cameras);
-
-
-    // Update the measurement and buffer
-    camera_buffers[cam_index].push_back(ros_image_msg);
     mtx_buffer.unlock();
     
     // Notify waiting threads
@@ -702,7 +695,61 @@ void map_incremental()
 
 PointCloudXYZI::Ptr pcl_wait_pub(new PointCloudXYZI());
 PointCloudXYZI::Ptr pcl_wait_save(new PointCloudXYZI());
-pcl::PointCloud<pcl::PointXYZRGB>::Ptr generateColorMap(sensor_msgs::msg::Image::SharedPtr msg_rgb,  // TODO : modify to use multiple cameras
+pcl::PointCloud<pcl::PointXYZRGB>::Ptr generateColorMap(sensor_msgs::msg::CompressedImage::SharedPtr msg_rgb, 
+                      Eigen::Affine3d T_c2l,
+                      pcl::PointCloud<pcl::PointXYZINormal>::Ptr &pc,
+                      const std::vector<double> &K_camera, 
+                      const std::vector<double> &D_camera)
+{
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr result = std::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
+
+    if (K_camera.size() != 9 || D_camera.size() != 5) {
+        RCLCPP_ERROR(rclcpp::get_logger("generateColorMap"), "Invalid camera parameters");
+        return result;
+    }
+    // Transform from LiDAR to Camera
+    Eigen::Matrix3d r_c2l = T_c2l.rotation();
+    Eigen::Vector3d t_c2l = T_c2l.translation();
+
+    // Convert ROS image to OpenCV format
+    cv::Mat img = cv::imdecode(cv::Mat(msg_rgb->data), cv::IMREAD_COLOR);
+    if (img.empty()) {
+        RCLCPP_ERROR(rclcpp::get_logger("generateColorMap"), "RGB image is empty");
+        return result;
+    }
+
+    // Process each point
+
+    for (size_t i = 0; i < pc->points.size(); ++i) {
+        Eigen::Vector3d point_pc = {pc->points[i].x, pc->points[i].y, pc->points[i].z};
+        Eigen::Vector3d point_camera = r_c2l * point_pc + t_c2l;
+
+        if (!std::isfinite(point_camera.z()) || point_camera.z() <= 0) {
+            // RCLCPP_WARN(rclcpp::get_logger("generateColorMap"), "Point %lu is behind the camera or invalid (z=%.2f)", i, point_camera.z());
+            continue;
+        }
+
+        Eigen::Vector2d point_2d(point_camera.x() / point_camera.z(), point_camera.y() / point_camera.z());
+        int u = static_cast<int>(K_camera[0] * point_2d.x() + K_camera[2]);
+        int v = static_cast<int>(K_camera[4] * point_2d.y() + K_camera[5]);
+
+        if (0 <= u && u < img.cols && 0 <= v && v < img.rows) {
+            // RCLCPP_WARN(rclcpp::get_logger("generateColorMap"), "Point %lu out of image bounds: (u=%d, v=%d)", i, u, v);
+            pcl::PointXYZRGB point_rgb;
+            point_rgb.x = point_pc.x();
+            point_rgb.y = point_pc.y();
+            point_rgb.z = point_pc.z();
+            cv::Vec3b color = img.at<cv::Vec3b>(v, u);
+            point_rgb.r = color[2];
+            point_rgb.g = color[1];
+            point_rgb.b = color[0];
+            result->push_back(point_rgb);
+        }
+    }
+    return result;
+}
+
+pcl::PointCloud<pcl::PointXYZRGB>::Ptr generateColorMap(sensor_msgs::msg::Image::SharedPtr msg_rgb, 
                       Eigen::Affine3d T_c2l,
                       pcl::PointCloud<pcl::PointXYZINormal>::Ptr &pc,
                       const std::vector<double> &K_camera, 
@@ -745,19 +792,19 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr generateColorMap(sensor_msgs::msg::Image:
         int u = static_cast<int>(K_camera[0] * point_2d.x() + K_camera[2]);
         int v = static_cast<int>(K_camera[4] * point_2d.y() + K_camera[5]);
 
-        if (u < 0 || u >= img.cols || v < 0 || v >= img.rows) {
+        
+        if (u <= 0 && u < img.cols && v <= 0 && v < img.rows) {
             // RCLCPP_WARN(rclcpp::get_logger("generateColorMap"), "Point %lu out of image bounds: (u=%d, v=%d)", i, u, v);
-            continue;
+            pcl::PointXYZRGB point_rgb;
+            point_rgb.x = point_pc.x();
+            point_rgb.y = point_pc.y();
+            point_rgb.z = point_pc.z();
+            cv::Vec3b color = img.at<cv::Vec3b>(v, u);
+            point_rgb.r = color[2];
+            point_rgb.g = color[1];
+            point_rgb.b = color[0];
+            result->push_back(point_rgb);
         }
-
-        pcl::PointXYZRGB point_rgb;
-        point_rgb.x = point_pc.x();
-        point_rgb.y = point_pc.y();
-        point_rgb.z = point_pc.z();
-        point_rgb.b = img.at<cv::Vec3b>(v, u)[0];
-        point_rgb.g = img.at<cv::Vec3b>(v, u)[1];
-        point_rgb.r = img.at<cv::Vec3b>(v, u)[2];
-        result->push_back(point_rgb);
     }
     return result;
 }
@@ -1188,10 +1235,17 @@ public:
 
 
         for(int i=0; i < camera_number; i++){
+            #ifdef ISAAC_SIM
             sub_images[i] = this->create_subscription<sensor_msgs::msg::CompressedImage>(
                 camera_topics[i], rclcpp::SensorDataQoS().keep_all(), [this, i](const sensor_msgs::msg::CompressedImage::SharedPtr msg) {
+                #else
+            sub_images[i] = this->create_subscription<sensor_msgs::msg::Image>(
+                camera_topics[i], rclcpp::SensorDataQoS().keep_all(), [this, i](const sensor_msgs::msg::Image::SharedPtr msg) {
+                });
+                #endif
                     camera_cbk(msg, i);
                 });
+
         }
 
         pubLaserCloudFull_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered", 20);

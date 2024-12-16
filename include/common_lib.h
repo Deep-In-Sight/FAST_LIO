@@ -9,6 +9,7 @@
 #include <sensor_msgs/msg/imu.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <sensor_msgs/msg/image.hpp>
+#include <sensor_msgs/msg/compressed_image.hpp>
 #include <array>
 
 
@@ -65,7 +66,11 @@ struct MeasureGroup     // Lidar data and imu dates for the curent process
     double lidar_end_time;
     PointCloudXYZI::Ptr lidar;
     deque<sensor_msgs::msg::Imu::ConstSharedPtr> imu;
+    #ifdef ISAAC_SIM
+    std::array<sensor_msgs::msg::CompressedImage::SharedPtr, cam_num> images;
+    #else
     std::array<sensor_msgs::msg::Image::SharedPtr, cam_num> images;
+    #endif
 };
 
 struct StatesGroup
