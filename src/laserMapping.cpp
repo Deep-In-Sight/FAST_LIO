@@ -529,32 +529,34 @@ bool sync_lidar_camera(const double& lidar_start_time)  // period of LiDAR and c
         if (time_diff + 0.01 > LIDAR_SCAN_DURATION ) // LiDAR time is ahead of camera time
         {
             int iter = (time_diff + 0.01) / LIDAR_SCAN_DURATION;
-            cout << "\nTime difference between LiDAR and Camera is " << time_diff << endl;
-            cout << "Drop single LiDAR scan, sync_lidar_camera not synced\n" << endl;
+            iter = (lidar_buffer.size() < iter) ? lidar_buffer.size() : iter;
+            // cout << "\nTime difference between LiDAR and Camera is " << time_diff << endl;
+            // cout << "Drop " << iter << "LiDAR scan, sync_lidar_camera not synced\n" << endl;
             for(int i = 0; i < iter; i++)
             {
-                if(!lidar_buffer.empty())
-                {
-                    lidar_buffer.pop_front();
-                    lidar_time_buffer.pop_front();
-                }
+                lidar_buffer.pop_front();
+                lidar_time_buffer.pop_front();
             }
-            is_synced = false;
+            if(lidar_buffer.empty())
+            {
+                is_synced = false;
+            }
             continue;
         }
         else if(time_diff - 0.01 < -LIDAR_SCAN_DURATION )  // camera time is ahead of LiDAR time
         {
-            int iter = ((-time_diff) + 0.01) / LIDAR_SCAN_DURATION;
-            // cout << "Time difference between LiDAR and Camera is " << time_diff << endl;
+            int iter = -(time_diff - 0.01) / LIDAR_SCAN_DURATION;
+            iter = (camera_buffers[cam_index].size() < iter) ? camera_buffers[cam_index].size() : iter;
+            cout << "Time difference between LiDAR and Camera is " << time_diff << endl;
             // cout << "Drop " << iter << " frames, cam index : " << cam_index << " Camera scan, sync_lidar_camera not synced" << endl;
             for(int i = 0; i < iter; i++)
             {
-                if(!camera_buffers[cam_index].empty())
-                {
-                    camera_buffers[cam_index].pop_front();
-                }
+                camera_buffers[cam_index].pop_front();
             }
-            is_synced = false;
+            if(camera_buffers[cam_index].empty())
+            {
+                is_synced = false;
+            }
         }
     }
     return is_synced;
@@ -1180,14 +1182,14 @@ public:
         else
 #endif
         {
-            sub_pcl_pc_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(lid_topic, rclcpp::SensorDataQoS(), standard_pcl_cbk);
+            sub_pcl_pc_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(lid_topic, rclcpp::SensorDataQoS().keep_all(), standard_pcl_cbk);
         }
         sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic, rclcpp::SensorDataQoS().keep_all(), imu_cbk);
 
 
         for(int i=0; i < camera_number; i++){
             sub_images[i] = this->create_subscription<sensor_msgs::msg::CompressedImage>(
-                camera_topics[i], rclcpp::QoS(10), [this, i](const sensor_msgs::msg::CompressedImage::SharedPtr msg) {
+                camera_topics[i], rclcpp::SensorDataQoS().keep_all(), [this, i](const sensor_msgs::msg::CompressedImage::SharedPtr msg) {
                     camera_cbk(msg, i);
                 });
         }
@@ -1484,7 +1486,7 @@ private:
             }
 
             sensor_msgs::msg::PointCloud2 output_msg;
-            if(color_pointcloud == nullptr || color_pointcloud->empty())
+            if(camera_number == 0)
                 pcl::toROSMsg(*feats_down_world, output_msg);
             else
                 pcl::toROSMsg(*color_pointcloud, output_msg);
