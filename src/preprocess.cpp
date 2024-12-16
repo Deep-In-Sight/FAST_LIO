@@ -52,7 +52,7 @@ void Preprocess::process(const livox_ros_driver2::msg::CustomMsg::UniquePtr &msg
 }
 #endif
 
-void Preprocess::process(const sensor_msgs::msg::PointCloud2::UniquePtr &msg, PointCloudXYZI::Ptr& pcl_out)
+void Preprocess::process(sensor_msgs::msg::PointCloud2::SharedPtr &msg, PointCloudXYZI::Ptr& pcl_out)
 {
   switch (time_unit)
   {
@@ -199,7 +199,7 @@ void Preprocess::avia_handler(const livox_ros_driver2::msg::CustomMsg::UniquePtr
 }
 #endif
 
-void Preprocess::oust64_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &msg)
+void Preprocess::oust64_handler(sensor_msgs::msg::PointCloud2::SharedPtr &msg)
 {
   pl_surf.clear();
   pl_corn.clear();
@@ -294,7 +294,7 @@ void Preprocess::oust64_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &
   // pub_func(pl_surf, pub_corn, msg->header.stamp);
 }
 
-void Preprocess::velodyne_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &msg)
+void Preprocess::velodyne_handler(sensor_msgs::msg::PointCloud2::SharedPtr &msg)
 {
   pl_surf.clear();
   pl_corn.clear();
@@ -559,7 +559,7 @@ void Preprocess::mid360_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &
 }
 #endif
 
-void Preprocess::default_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &msg)
+void Preprocess::default_handler(sensor_msgs::msg::PointCloud2::SharedPtr &msg)
 {
   pl_surf.clear();
   pl_corn.clear();

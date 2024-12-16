@@ -92,7 +92,9 @@ ament_export_dependencies(rosidl_default_runtime)
 
 # Define executable
 add_executable(fastlio_color
+  src/main.cpp
   src/laserMapping.cpp
+  src/synchronizer.cpp
   include/ikd-Tree/ikd_Tree.cpp
   src/preprocess.cpp
   src/LensDistortionCorrection.cpp
@@ -107,6 +109,7 @@ endif()
 # Link libraries and include directories
 target_include_directories(fastlio_color PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
   $<INSTALL_INTERFACE:include>
   ${PCL_INCLUDE_DIRS}
   ${Python3_INCLUDE_DIRS}
@@ -146,10 +149,6 @@ endif()
 
 # Installation rules
 install(TARGETS fastlio_color
-  DESTINATION lib/${PROJECT_NAME}
-)
-
-install(TARGETS synchronizer
   DESTINATION lib/${PROJECT_NAME}
 )
 
