@@ -124,10 +124,21 @@ else()
   target_link_libraries(fastlio_mapping ${cpp_typesupport_target})
 endif()
 
+add_executable(synchronizer src/synchronizer.cpp)
+target_include_directories(synchronizer PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
 ament_target_dependencies(fastlio_mapping ${dependencies})
+ament_target_dependencies(synchronizer ${dependencies})
 
 # ---------------- Install --------------- #
 install(TARGETS fastlio_mapping
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+install(TARGETS synchronizer
   DESTINATION lib/${PROJECT_NAME}
 )
 
