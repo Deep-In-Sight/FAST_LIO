@@ -753,21 +753,30 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr generateColorMap(std::array<sensor_msgs::
         
         #ifdef ISAAC_SIM
         Eigen::Vector2d point_2d(point_camera.x() / point_camera.z(), point_camera.y() / point_camera.z());
-        int u = static_cast<int>(K_camera[cam_index][0] * point_2d.x() + K_camera[cam_index][2]);
-        int v = static_cast<int>(K_camera[cam_index][4] * point_2d.y() + K_camera[cam_index][5]);
+        int u = static_cast<int>(K_cameras[cam_index][0] * point_2d.x() + K_cameras[cam_index][2]);
+        int v = static_cast<int>(K_cameras[cam_index][4] * point_2d.y() + K_cameras[cam_index][5]);
 
-        if (0 <= u && u < img.cols && 0 <= v && v < img.rows) {
-            RCLCPP_WARN(rclcpp::get_logger("generateColorMap"), "Point %lu out of image bounds: (u=%d, v=%d)", i, u, v);
+
+        if (0 <= u && u < imgs[cam_index].cols && 0 <= v && v < imgs[cam_index].rows) {
+            cv::Vec3b color = imgs[cam_index].at<cv::Vec3b>(v, u);
+
+            pcl::PointXYZRGB point_rgb;
+            point_rgb.x = point_pc.x();
+            point_rgb.y = point_pc.y();
+            point_rgb.z = point_pc.z();
+            point_rgb.r = color[2];
+            point_rgb.g = color[1];
+            point_rgb.b = color[0];
+            result->push_back(point_rgb);
         }
-        cv::Vec3b color = img.at<cv::Vec3b>(v, u);
-
-        point_rgb.r = color[2];
-        point_rgb.g = color[1];
-        point_rgb.b = color[0];
         #else
 
-        float azimuth = atan2(point_camera.x(), point_camera.z()) * 57.29579143;
-        float elevation = atan2(-point_camera.y(), point_camera.z()) * 57.29579143;
+        float azimuth = atan2(point_camera.x(), point_camera.z()) * 57.29579143; // -fov ~ 0 ~ +fov
+        float elevation = atan2(-point_camera.y(), point_camera.z()) * 57.29579143; // -fov ~ 0 ~ +fov
+        pcl::PointXYZRGB point_rgb;
+        point_rgb.x = point_pc.x();
+        point_rgb.y = point_pc.y();
+        point_rgb.z = point_pc.z();
         point_rgb.r = 0;
         point_rgb.g = 0;
         point_rgb.b = 0;
@@ -781,11 +790,8 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr generateColorMap(std::array<sensor_msgs::
             else
                 point_rgb.b = 255;
         }
-        #endif
-            
-
-
         result->push_back(point_rgb);
+        #endif
     }
 
     return result;
