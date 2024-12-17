@@ -695,117 +695,99 @@ void map_incremental()
 
 PointCloudXYZI::Ptr pcl_wait_pub(new PointCloudXYZI());
 PointCloudXYZI::Ptr pcl_wait_save(new PointCloudXYZI());
-pcl::PointCloud<pcl::PointXYZRGB>::Ptr generateColorMap(sensor_msgs::msg::CompressedImage::SharedPtr msg_rgb, 
-                      Eigen::Affine3d T_c2l,
-                      pcl::PointCloud<pcl::PointXYZINormal>::Ptr &pc,
-                      const std::vector<double> &K_camera, 
-                      const std::vector<double> &D_camera)
+pcl::PointCloud<pcl::PointXYZRGB>::Ptr generateColorMap(std::array<sensor_msgs::msg::CompressedImage::SharedPtr, cam_num> &image_msgs,
+                                                       std::array<Eigen::Affine3d, cam_num> &T_L2Cs,
+                                                        pcl::PointCloud<pcl::PointXYZINormal>::Ptr &pc,
+                                                        const std::array<std::vector<double>, cam_num> &K_cameras)
 {
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr result = std::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
+    std::array<Eigen::Matrix3d, cam_num> rot_l2cs;
+    std::array<Eigen::Vector3d, cam_num> t_l2cs;
+    std::array<cv::Mat, cam_num> imgs;
+    for(int cam_index = 0; cam_index < camera_number; cam_index++){
+        if (K_cameras[cam_index].size() != 9) {
+            RCLCPP_ERROR(rclcpp::get_logger("generateColorMap"), "Invalid camera parameters");
+            return result;
+        }
+        // Transform from LiDAR to Camera
+        rot_l2cs[cam_index] = T_L2Cs[cam_index].inverse().rotation();
+        t_l2cs[cam_index] = T_L2Cs[cam_index].inverse().translation();
 
-    if (K_camera.size() != 9 || D_camera.size() != 5) {
-        RCLCPP_ERROR(rclcpp::get_logger("generateColorMap"), "Invalid camera parameters");
-        return result;
+        // Convert ROS image to OpenCV format
+        imgs[cam_index] = cv::imdecode(cv::Mat(image_msgs[cam_index]->data), cv::IMREAD_COLOR);
+        if (imgs[cam_index].empty()) {
+            RCLCPP_ERROR(rclcpp::get_logger("generateColorMap"), "RGB image is empty");
+            return result;
+        }
     }
-    // Transform from LiDAR to Camera
-    Eigen::Matrix3d r_c2l = T_c2l.rotation();
-    Eigen::Vector3d t_c2l = T_c2l.translation();
-
-    // Convert ROS image to OpenCV format
-    cv::Mat img = cv::imdecode(cv::Mat(msg_rgb->data), cv::IMREAD_COLOR);
-    if (img.empty()) {
-        RCLCPP_ERROR(rclcpp::get_logger("generateColorMap"), "RGB image is empty");
-        return result;
-    }
-
-    // Process each point
-
+        // Process each point
     for (size_t i = 0; i < pc->points.size(); ++i) {
         Eigen::Vector3d point_pc = {pc->points[i].x, pc->points[i].y, pc->points[i].z};
-        Eigen::Vector3d point_camera = r_c2l * point_pc + t_c2l;
+        float degree = atan2(point_pc.x(), point_pc.y()) * 57.29579143; 
+        degree -= 90; // rotate counterclockwise 90 degree
+        if(degree < 0)
+            degree += 360; // front : 0, right : 90, back : 180, left : 270
+
+        int cam_index;
+        if(45 * 5 <= degree && degree < 45 * 7) //
+            cam_index = 1;
+        else if(45 * 7 <= degree || degree < 45)
+            cam_index = 0;
+        else if(45 <= degree && degree < 45 * 3)
+            cam_index = 2;
+        else
+            continue;
+        Eigen::Vector3d point_camera = rot_l2cs[cam_index] * point_pc + t_l2cs[cam_index];
 
         if (!std::isfinite(point_camera.z()) || point_camera.z() <= 0) {
             // RCLCPP_WARN(rclcpp::get_logger("generateColorMap"), "Point %lu is behind the camera or invalid (z=%.2f)", i, point_camera.z());
             continue;
         }
 
-        Eigen::Vector2d point_2d(point_camera.x() / point_camera.z(), point_camera.y() / point_camera.z());
-        int u = static_cast<int>(K_camera[0] * point_2d.x() + K_camera[2]);
-        int v = static_cast<int>(K_camera[4] * point_2d.y() + K_camera[5]);
+        pcl::PointXYZRGB point_rgb;
+        point_rgb.x = point_pc.x();
+        point_rgb.y = point_pc.y();
+        point_rgb.z = point_pc.z();
 
-        if (0 <= u && u < img.cols && 0 <= v && v < img.rows) {
-            // RCLCPP_WARN(rclcpp::get_logger("generateColorMap"), "Point %lu out of image bounds: (u=%d, v=%d)", i, u, v);
-            pcl::PointXYZRGB point_rgb;
-            point_rgb.x = point_pc.x();
-            point_rgb.y = point_pc.y();
-            point_rgb.z = point_pc.z();
-            cv::Vec3b color = img.at<cv::Vec3b>(v, u);
-            point_rgb.r = color[2];
-            point_rgb.g = color[1];
-            point_rgb.b = color[0];
-            result->push_back(point_rgb);
-        }
-    }
-    return result;
-}
-
-pcl::PointCloud<pcl::PointXYZRGB>::Ptr generateColorMap(sensor_msgs::msg::Image::SharedPtr msg_rgb, 
-                      Eigen::Affine3d T_c2l,
-                      pcl::PointCloud<pcl::PointXYZINormal>::Ptr &pc,
-                      const std::vector<double> &K_camera, 
-                      const std::vector<double> &D_camera)
-{
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr result = std::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
-
-    if (K_camera.size() != 9 || D_camera.size() != 5) {
-        RCLCPP_ERROR(rclcpp::get_logger("generateColorMap"), "Invalid camera parameters");
-        return result;
-    }
-    // Transform from LiDAR to Camera
-    Eigen::Matrix3d r_c2l = T_c2l.rotation();
-    Eigen::Vector3d t_c2l = T_c2l.translation();
-
-    // Convert ROS image to OpenCV format
-    cv::Mat img = cv_bridge::toCvCopy(*msg_rgb, "bgr8")->image;
-    if (img.empty()) {
-        RCLCPP_ERROR(rclcpp::get_logger("generateColorMap"), "RGB image is empty");
-        return result;
-    }
-
-    // Process each point
-
-    for (size_t i = 0; i < pc->points.size(); ++i) {
-        Eigen::Vector3d point_pc = {pc->points[i].x, pc->points[i].y, pc->points[i].z};
-        Eigen::Vector3d point_camera = r_c2l * point_pc + t_c2l;
-
-        float degree = atan2(point_pc.x(), point_pc.y()) * 57.29579143;
-        degree -= 90;
-        if(degree < 0) 
-            degree += 360;
-
-        if (!std::isfinite(point_camera.z()) || point_camera.z() <= 0) {
-            // RCLCPP_WARN(rclcpp::get_logger("generateColorMap"), "Point %lu is behind the camera or invalid (z=%.2f)", i, point_camera.z());
-            continue;
-        }
-
-        Eigen::Vector2d point_2d(point_camera.x() / point_camera.z(), point_camera.y() / point_camera.z());
-        int u = static_cast<int>(K_camera[0] * point_2d.x() + K_camera[2]);
-        int v = static_cast<int>(K_camera[4] * point_2d.y() + K_camera[5]);
 
         
-        if (u <= 0 && u < img.cols && v <= 0 && v < img.rows) {
-            // RCLCPP_WARN(rclcpp::get_logger("generateColorMap"), "Point %lu out of image bounds: (u=%d, v=%d)", i, u, v);
-            pcl::PointXYZRGB point_rgb;
-            point_rgb.x = point_pc.x();
-            point_rgb.y = point_pc.y();
-            point_rgb.z = point_pc.z();
-            cv::Vec3b color = img.at<cv::Vec3b>(v, u);
-            point_rgb.r = color[2];
-            point_rgb.g = color[1];
-            point_rgb.b = color[0];
-            result->push_back(point_rgb);
+        #ifdef ISAAC_SIM
+        Eigen::Vector2d point_2d(point_camera.x() / point_camera.z(), point_camera.y() / point_camera.z());
+        int u = static_cast<int>(K_camera[cam_index][0] * point_2d.x() + K_camera[cam_index][2]);
+        int v = static_cast<int>(K_camera[cam_index][4] * point_2d.y() + K_camera[cam_index][5]);
+
+        if (0 <= u && u < img.cols && 0 <= v && v < img.rows) {
+            RCLCPP_WARN(rclcpp::get_logger("generateColorMap"), "Point %lu out of image bounds: (u=%d, v=%d)", i, u, v);
         }
+        cv::Vec3b color = img.at<cv::Vec3b>(v, u);
+
+        point_rgb.r = color[2];
+        point_rgb.g = color[1];
+        point_rgb.b = color[0];
+        #else
+
+        float azimuth = atan2(point_camera.x(), point_camera.z()) * 57.29579143;
+        float elevation = atan2(-point_camera.y(), point_camera.z()) * 57.29579143;
+        point_rgb.r = 0;
+        point_rgb.g = 0;
+        point_rgb.b = 0;
+
+        if(elevation > 10)
+        {
+            if(cam_index == 0)
+                point_rgb.r = 255;
+            else if(cam_index == 1)
+                point_rgb.g = 255;
+            else
+                point_rgb.b = 255;
+        }
+        #endif
+            
+
+
+        result->push_back(point_rgb);
     }
+
     return result;
 }
 
@@ -1510,34 +1492,15 @@ private:
             t5 = omp_get_wtime();
             
             /******* color mapping *******/
-            state_ikfom cameratime_state = kf.get_x();
-
-            Eigen::Affine3d state_imu_camera_time = Eigen::Affine3d::Identity();
-            state_imu_camera_time.translate(Eigen::Vector3d(cameratime_state.pos));
-            state_imu_camera_time.rotate(Eigen::Quaterniond(cameratime_state.rot));
-
-            std::array<Eigen::Affine3d, 3> state_cameras;
-            for(int i = 0; i < 3; i++){
-                state_cameras[i] = state_imu_camera_time * T_I2L * T_L2Cs[i];
-            }
-
             Eigen::Affine3d state_imu = Eigen::Affine3d::Identity();
             state_imu.translate(Eigen::Vector3d(kf.get_x().pos));
             state_imu.rotate(Eigen::Quaterniond(kf.get_x().rot));
             Eigen::Affine3d state_lidar = state_imu * T_I2L;
 
             pcl::PointCloud<pcl::PointXYZRGB>::Ptr color_pointcloud(new pcl::PointCloud<pcl::PointXYZRGB>());
+            *color_pointcloud = *generateColorMap(Measures.images, T_L2Cs, feats_down_body, K_cameras);
+            pcl::transformPointCloud(*color_pointcloud, *color_pointcloud, state_lidar.matrix());
 
-            for(int i = 0; i < camera_number; i++){
-                if(Measures.images[i] != nullptr && Measures.images[i]->data.empty() == false){
-                    pcl::PointCloud<pcl::PointXYZRGB>::Ptr single_cam_pointcloud = std::make_shared<pcl::PointCloud<pcl::PointXYZRGB>>();
-
-                    Eigen::Affine3d T_c2l = state_cameras[i].inverse() * state_lidar;
-                    single_cam_pointcloud = generateColorMap(Measures.images[i], T_c2l, feats_down_body, K_cameras[i], D_cameras[i]);
-                    pcl::transformPointCloud(*single_cam_pointcloud, *single_cam_pointcloud, state_lidar.matrix());
-                    *color_pointcloud += *single_cam_pointcloud;
-                }
-            }
 
             sensor_msgs::msg::PointCloud2 output_msg;
             if(camera_number == 0)
@@ -1616,7 +1579,7 @@ private:
 
 private:
     Eigen::Affine3d T_I2L;
-    std::array<Eigen::Affine3d, 3> T_L2Cs;
+    std::array<Eigen::Affine3d, cam_num> T_L2Cs;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudFull_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudFull_body_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudEffect_;
