@@ -75,10 +75,6 @@ endif()
 find_package(rosidl_default_generators REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(OpenCV REQUIRED)
-find_package(JPEG REQUIRED)
-
-message("JPEG_INCLUDE_DIRS: ${JPEG_INCLUDE_DIRS}")
-message("JPEG_LIBRARIES: ${JPEG_LIBRARIES}")
 
 set(dependencies
   rclcpp
@@ -122,9 +118,8 @@ target_include_directories(fastlio_mapping PUBLIC
   $<INSTALL_INTERFACE:include>
   ${PCL_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS}
-  ${JPEG_INCLUDE_DIRS}
 )
-target_link_libraries(fastlio_mapping ${PCL_LIBRARIES} ${PYTHON_LIBRARIES} Eigen3::Eigen spdlog::spdlog unwind unwind-x86_64 ${OpenCV_LIBS} ${JPEG_LIBRARIES})
+target_link_libraries(fastlio_mapping ${PCL_LIBRARIES} ${PYTHON_LIBRARIES} Eigen3::Eigen spdlog::spdlog unwind unwind-x86_64 ${OpenCV_LIBS})
 target_include_directories(fastlio_mapping PRIVATE ${PYTHON_INCLUDE_DIRS})
 
 list(APPEND EOL_LIST "foxy" "galactic" "eloquent" "dashing" "crystal")

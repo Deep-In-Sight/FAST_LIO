@@ -2,6 +2,7 @@
 #include <fmt/ranges.h>
 #include <opencv2/opencv.hpp>
 #include <pcl/common/transforms.h>
+#include <pcl/filters/passthrough.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <rclcpp/qos.hpp>
 #include <rclcpp/time.hpp>
@@ -40,8 +41,10 @@ void ColormapNode::queuePointCloud(PointCloudXYZRGBN::Ptr &pcd)
 
 void ColormapNode::initParameters()
 {
+    this->declare_parameter<bool>("publish.color_en", false);
     this->declare_parameter<string>("camera.topic", "/camera");
     this->declare_parameter<string>("camera.pcd_topic", "/colored_cloud");
+    this->declare_parameter<double>("camera.z_filter", 0.0);
     this->declare_parameter<vector<double>>("camera.intrinsics", vector<double>());
     this->declare_parameter<double>("camera.time_offset", 0.0);
     auto declare_extrinsics = [&](string frame_id) {
@@ -55,8 +58,10 @@ void ColormapNode::initParameters()
     declare_extrinsics("camera.right");
 
     bool success = true;
+    success &= this->get_parameter_or("publish.color_en", params.publish_color_en, false);
     success &= this->get_parameter("camera.topic", params.camera_topic);
     success &= this->get_parameter("camera.pcd_topic", params.pcd_topic);
+    success &= this->get_parameter("camera.z_filter", params.z_filter);
     success &= this->get_parameter("camera.intrinsics", params.intrinsics);
     success &= this->get_parameter("camera.time_offset", params.time_offset);
     auto get_extrinsics = [&](string frame_id) {
@@ -203,6 +208,15 @@ void ColormapNode::mapPinHole(PointCloudXYZRGBN &pcd, ImageMsg &img)
     logger->info("Mapped {} points", mapped); // mapping time is minimal compared to decoding time
 }
 
+void filterPointCloud(PointCloudXYZRGBN::Ptr cloud, float z_limit)
+{
+    pcl::PassThrough<PointCloudXYZRGBN::PointType> pass;
+    pass.setInputCloud(cloud);
+    pass.setFilterFieldName("z");
+    pass.setFilterLimits(-std::numeric_limits<float>::max(), z_limit); // Keep points with z <= z_limit
+    pass.filter(*cloud);
+}
+
 void ColormapNode::colorizePointCloud(ColormapNode::FrameGroup &g)
 {
     if (g.imgs.empty())
@@ -218,6 +232,10 @@ void ColormapNode::colorizePointCloud(ColormapNode::FrameGroup &g)
     auto pos = g.pcd->sensor_origin_.head<3>();
     auto orient = g.pcd->sensor_orientation_;
     pcl::transformPointCloud(*(g.pcd), *(g.pcd), pos, orient);
+    if (params.z_filter > 0)
+    {
+        filterPointCloud(g.pcd, params.z_filter);
+    }
     PointCloud2Msg pcd_msg;
     pcl::toROSMsg(*(g.pcd), pcd_msg);
     pcd_msg.header.stamp = rclcpp::Time(g.pcd->header.stamp * 1e6); // ms to ns
@@ -250,6 +268,12 @@ ColormapNode::ColormapNode(const rclcpp::NodeOptions &options) : Node("colormap_
     initParameters();
     printParameters();
 
+    if (!params.publish_color_en)
+    {
+        logger->info("Colormap disabled, goodbye");
+        return;
+    }
+
     auto qos = rclcpp::SensorDataQoS().reliable();
 
     image_subscriber = this->create_subscription<ImageMsg>(
@@ -258,12 +282,16 @@ ColormapNode::ColormapNode(const rclcpp::NodeOptions &options) : Node("colormap_
 
     running = true;
     colorize_thread = new std::thread(&ColormapNode::worker, this);
+    initialized = true;
 }
 
 ColormapNode::~ColormapNode()
 {
-    running = false;
-    cv.notify_all();
-    colorize_thread->join();
-    delete colorize_thread;
+    if (colorize_thread)
+    {
+        running = false;
+        cv.notify_all();
+        colorize_thread->join();
+        delete colorize_thread;
+    }
 }

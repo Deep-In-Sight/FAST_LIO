@@ -23,8 +23,10 @@ class ColormapNode : public rclcpp::Node
 
     struct ColormapParams
     {
+        bool publish_color_en;
         std::string camera_topic;
         std::string pcd_topic;
+        double z_filter;
         double time_offset;
         std::vector<double> intrinsics;
         std::map<std::string, Eigen::Vector3d> extrinsics_T_CI; // from imu to camera
@@ -42,6 +44,10 @@ class ColormapNode : public rclcpp::Node
     ColormapNode(const ColormapNode &) = delete;
     ColormapNode &operator=(const ColormapNode &) = delete;
 
+    bool isInitialized()
+    {
+        return initialized;
+    }
     void queuePointCloud(PointCloudXYZRGBN::Ptr &msg);
     ~ColormapNode();
 
@@ -68,4 +74,6 @@ class ColormapNode : public rclcpp::Node
     std::mutex mtx;
     std::condition_variable cv;
     std::thread *colorize_thread;
+
+    bool initialized = false;
 };

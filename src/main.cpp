@@ -2,6 +2,7 @@
 #include <laserMapping.hpp>
 #include <libunwind.h>
 
+std::atomic<bool> stack_trace_printed{false}; // Prevent re-entry
 void print_stack_trace()
 {
     unw_cursor_t cursor;
@@ -25,7 +26,16 @@ void print_stack_trace()
 
 void SigHandle(int sig)
 {
-    print_stack_trace();
+    if (stack_trace_printed.exchange(true))
+    {
+        // Avoid handling the signal again
+        return;
+    }
+    printf("Caught signal %d\n", sig);
+    if (sig == SIGSEGV || sig == SIGABRT)
+    {
+        print_stack_trace();
+    }
     rclcpp::shutdown();
 }
 
@@ -35,6 +45,7 @@ int main(int argc, char **argv)
 
     signal(SIGINT, SigHandle);
     signal(SIGSEGV, SigHandle);
+    signal(SIGABRT, SigHandle);
 
     auto mappingNode = std::make_shared<LaserMappingNode>();
     auto colorizeNode = ColormapNode::getInstance();
