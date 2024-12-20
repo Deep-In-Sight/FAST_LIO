@@ -34,11 +34,41 @@
             extrinsic_R: [1., 0., 0.,
                         0., 1., 0.,
                         0., 0., 1.]
+        
+        camera:
+            topic: "/camera"
+            pcd_topic: "/colored_cloud"
+            intrinsics: [960.0, 0.0, 960.0,
+                    0.0, 960.0, 600.0,
+                    0.0, 0.0, 1.0] # fx,0,cx,0,fy,cy,0,0,1
+            time_offset: 0.0  
+            front:
+                frame_id: "cam_front"
+                extrinsic_T: [ 0.05, 0.0, -0.05 ] # imu to camera
+                extrinsic_R: [ 0.0,  0.0,  1.0,
+                            -1.0,  0.0,  0.0,
+                            0.0, -1.0,  0.0 ]
+                fov: [ -45.0, 45.0] 
+            left:
+                frame_id: "cam_left"
+                extrinsic_T: [ 0.0, 0.05, -0.05 ] 
+                extrinsic_R: [ 1.0,  0.0,  0.0,
+                            0.0,  0.0, 1.0,
+                            0.0,  -1.0,  0.0 ]
+                fov: [ 45.0, 135.0 ]
+            right:
+                frame_id: "cam_right"
+                extrinsic_T: [ 0.0, -0.05, -0.05 ] 
+                extrinsic_R: [ -1.0,  0.0, 0.0,
+                            0.0,  0.0,  -1.0,
+                            0.0, -1.0,  0.0 ]
+                fov: [ -135.0, -45.0 ]
 
         publish:
-            path_en:  false
-            scan_publish_en:  true       # false: close all the point cloud output
-            dense_publish_en: true       # false: low down the points number in a global-frame point clouds scan.
+            path_en:  true
+            color_en: true               # publish the color point cloud, must have scan_bodyframe_pub_en = true
+            scan_publish_en:  false      # publish the point cloud scans in global frame
+            dense_publish_en: false      # publish full lidar scan or down sampled scan
             scan_bodyframe_pub_en: true  # true: output the point cloud scans in IMU-body-frame
 
         pcd_save:

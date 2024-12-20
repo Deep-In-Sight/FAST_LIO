@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.8)
 project(fast_lio)
 
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+  add_compile_definitions(-g)
+endif()
+
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
@@ -69,6 +73,12 @@ if (USE_LIVOX)
   find_package(livox_ros_driver2 REQUIRED)
 endif()
 find_package(rosidl_default_generators REQUIRED)
+find_package(spdlog REQUIRED)
+find_package(OpenCV REQUIRED)
+find_package(JPEG REQUIRED)
+
+message("JPEG_INCLUDE_DIRS: ${JPEG_INCLUDE_DIRS}")
+message("JPEG_LIBRARIES: ${JPEG_LIBRARIES}")
 
 set(dependencies
   rclcpp
@@ -81,6 +91,8 @@ set(dependencies
   visualization_msgs
   pcl_ros
   pcl_conversions
+  spdlog
+  OpenCV
 )
 
 if (USE_LIVOX)
@@ -103,14 +115,16 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 )
 ament_export_dependencies(rosidl_default_runtime)
 
-add_executable(fastlio_mapping src/laserMapping.cpp include/ikd-Tree/ikd_Tree.cpp src/preprocess.cpp src/main.cpp)
+add_executable(fastlio_mapping src/laserMapping.cpp include/ikd-Tree/ikd_Tree.cpp src/preprocess.cpp src/main.cpp src/colormap.cpp)
 target_include_directories(fastlio_mapping PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
   $<INSTALL_INTERFACE:include>
   ${PCL_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
+  ${JPEG_INCLUDE_DIRS}
 )
-target_link_libraries(fastlio_mapping ${PCL_LIBRARIES} ${PYTHON_LIBRARIES} Eigen3::Eigen)
+target_link_libraries(fastlio_mapping ${PCL_LIBRARIES} ${PYTHON_LIBRARIES} Eigen3::Eigen spdlog::spdlog unwind unwind-x86_64 ${OpenCV_LIBS} ${JPEG_LIBRARIES})
 target_include_directories(fastlio_mapping PRIVATE ${PYTHON_INCLUDE_DIRS})
 
 list(APPEND EOL_LIST "foxy" "galactic" "eloquent" "dashing" "crystal")

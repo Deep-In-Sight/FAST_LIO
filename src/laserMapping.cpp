@@ -66,6 +66,7 @@
 #include <ikd-Tree/ikd_Tree.h>
 
 #include <laserMapping.hpp>
+#include <colormap.hpp>
 
 #define INIT_TIME           (0.1)
 #define LASER_POINT_COV     (0.001)
@@ -208,7 +209,7 @@ void RGBpointBodyToWorld(PointType const * const pi, PointType * const po)
     po->intensity = pi->intensity;
 }
 
-void RGBpointBodyLidarToIMU(PointType const * const pi, PointType * const po)
+void RGBpointBodyLidarToIMU(PointType const * const pi, PointRGBType * const po)
 {
     V3D p_body_lidar(pi->x, pi->y, pi->z);
     V3D p_body_imu(state_point.offset_R_L_I*p_body_lidar + state_point.offset_T_L_I);
@@ -216,7 +217,7 @@ void RGBpointBodyLidarToIMU(PointType const * const pi, PointType * const po)
     po->x = p_body_imu(0);
     po->y = p_body_imu(1);
     po->z = p_body_imu(2);
-    po->intensity = pi->intensity;
+    po->curvature = pi->curvature;
 }
 
 void points_cache_collect()
@@ -605,7 +606,7 @@ void publish_frame_world(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::Share
 void publish_frame_body(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudFull_body)
 {
     int size = feats_undistort->points.size();
-    PointCloudXYZI::Ptr laserCloudIMUBody(new PointCloudXYZI(size, 1));
+    PointCloudXYZRGBN::Ptr laserCloudIMUBody(new PointCloudXYZRGBN(size, 1));
 
     for (int i = 0; i < size; i++)
     {
@@ -619,6 +620,13 @@ void publish_frame_body(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::Shared
     laserCloudmsg.header.frame_id = "body";
     pubLaserCloudFull_body->publish(laserCloudmsg);
     publish_count -= PUBFRAME_PERIOD;
+
+    laserCloudIMUBody->header.stamp = (uint64_t)(lidar_end_time * 1e3);
+    laserCloudIMUBody->sensor_origin_.head<3>() = state_point.pos.cast<float>();
+    laserCloudIMUBody->sensor_orientation_ = state_point.rot.cast<float>();
+
+    auto colorNode = ColormapNode::getInstance();
+    colorNode->queuePointCloud(laserCloudIMUBody);
 }
 
 void publish_effect_world(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudEffect)
@@ -1137,7 +1145,7 @@ void LaserMappingNode::timer_callback()
         /******* Publish points *******/
         if (path_en)                         publish_path(pubPath_);
         if (scan_pub_en)      publish_frame_world(pubLaserCloudFull_);
-        if (scan_pub_en && scan_body_pub_en) publish_frame_body(pubLaserCloudFull_body_);
+        if (scan_body_pub_en) publish_frame_body(pubLaserCloudFull_body_);
         if (effect_pub_en) publish_effect_world(pubLaserCloudEffect_);
         // if (map_pub_en) publish_map(pubLaserCloudMap_);
 
