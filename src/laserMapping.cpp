@@ -67,6 +67,10 @@
 
 #include <laserMapping.hpp>
 #include <colormap.hpp>
+#include <spdlog/spdlog.h>
+#include <spdlog/sinks/basic_file_sink.h>
+
+auto mapLogger = spdlog::basic_logger_mt("map_logger", "laserMapping_node.log", true);
 
 #define INIT_TIME           (0.1)
 #define LASER_POINT_COV     (0.001)
@@ -293,6 +297,11 @@ void standard_pcl_cbk(const sensor_msgs::msg::PointCloud2::UniquePtr msg)
         is_first_lidar = false;
     }
 
+    mapLogger->info("Lidar: {}", cur_time);
+    if (std::abs(cur_time - last_timestamp_lidar) > 0.1) {
+        mapLogger->warn("Lidar discontinuity: {}->{}", last_timestamp_lidar, cur_time);
+    }
+
     PointCloudXYZI::Ptr  ptr(new PointCloudXYZI());
     p_pre->process(msg, ptr);
     lidar_buffer.push_back(ptr);
@@ -362,12 +371,17 @@ void imu_cbk(const sensor_msgs::msg::Imu::UniquePtr msg_in)
 
     double timestamp = get_time_sec(msg->header.stamp);
 
+    mapLogger->info("IMU: {}", timestamp);
+
     mtx_buffer.lock();
 
     if (timestamp < last_timestamp_imu)
     {
-        std::cerr << "lidar loop back, clear buffer" << std::endl;
+        mapLogger->warn("IMU discontinuity: {}->{}", last_timestamp_imu, timestamp);
         imu_buffer.clear();
+    } else if (timestamp - last_timestamp_imu > 1.1*1.0/400)
+    {
+        mapLogger->warn("IMU time gap: {}->{}", last_timestamp_imu, timestamp);
     }
 
     last_timestamp_imu = timestamp;
@@ -437,7 +451,7 @@ bool sync_packages(MeasureGroup &meas)
 #else
 bool sync_packages(MeasureGroup &meas)
 {
-    if (lidar_buffer.empty() || imu_buffer.empty()) 
+    if (lidar_buffer.empty() || imu_buffer.size() < 100) 
     {
         return false;
     }
@@ -483,13 +497,11 @@ bool sync_packages(MeasureGroup &meas)
     
     if (meas.imu.size() != 40)
     {
-        cerr << "Error:"
-             << " lidar_beg_time:" << meas.lidar_beg_time
-             << " lidar_end_time:" << meas.lidar_end_time
-             << " imu size:" << meas.imu.size()
-             << " imu first time:" << get_time_sec(meas.imu.front()->header.stamp)
-             << " imu last time:" << get_time_sec(meas.imu.back()->header.stamp)
-             << endl;
+        mapLogger->error("Lost sync, IMU size: {}, lidar beg/end {}/{}, imu first/last {}/{}, grouped imu first/last {}/{}",
+            meas.imu.size(),
+            meas.lidar_beg_time, meas.lidar_end_time,
+            imu_first_time, imu_last_time,
+            get_time_sec(meas.imu.front()->header.stamp), get_time_sec(meas.imu.back()->header.stamp));
     }
  
     return true;
@@ -863,6 +875,7 @@ void h_share_model(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_
 
 LaserMappingNode::LaserMappingNode(const rclcpp::NodeOptions& options) : Node("laser_mapping", options)
 {
+    mapLogger->flush_on(spdlog::level::info);
     this->declare_parameter<bool>("publish.path_en", true);
     this->declare_parameter<bool>("publish.effect_map_en", false);
     this->declare_parameter<bool>("publish.map_en", false);
@@ -982,18 +995,19 @@ LaserMappingNode::LaserMappingNode(const rclcpp::NodeOptions& options) : Node("l
     else
         cout << "~~~~"<<ROOT_DIR<<" doesn't exist" << endl;
 
+    auto qos = rclcpp::QoS(10).keep_all().reliable();
     /*** ROS subscribe initialization ***/
 #ifdef USE_LIVOX
     if (p_pre->lidar_type == AVIA)
     {
-        sub_pcl_livox_ = this->create_subscription<livox_ros_driver2::msg::CustomMsg>(lid_topic, 20, livox_pcl_cbk);
+        sub_pcl_livox_ = this->create_subscription<livox_ros_driver2::msg::CustomMsg>(lid_topic, qos, livox_pcl_cbk);
     }
     else
 #endif
     {
-        sub_pcl_pc_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(lid_topic, rclcpp::SensorDataQoS(), standard_pcl_cbk);
+        sub_pcl_pc_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(lid_topic, qos, standard_pcl_cbk);
     }
-    sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic, rclcpp::SensorDataQoS().keep_all(), imu_cbk);
+    sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic, qos, imu_cbk);
     pubLaserCloudFull_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered", 20);
     pubLaserCloudFull_body_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered_body", 20);
     pubLaserCloudEffect_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_effected", 20);

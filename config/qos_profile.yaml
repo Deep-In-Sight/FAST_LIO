@@ -1,0 +1,18 @@
+/camera:
+  reliability: reliable
+  history: keep_all
+  lifespan:
+    sec: 60
+    nsec: 0
+/imu/data:
+  reliability: reliable
+  history: keep_all
+  lifespan:
+    sec: 60
+    nsec: 0
+/lidar:
+  reliability: reliable
+  history: keep_all
+  lifespan:
+    sec: 60
+    nsec: 0
