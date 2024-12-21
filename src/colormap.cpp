@@ -155,7 +155,7 @@ ColormapNode::FrameGroup ColormapNode::sync()
     return g;
 }
 
-void ColormapNode::mapPinHole(PointCloudXYZRGBN &pcd, ImageMsg &img)
+void ColormapNode::mapPinHole(PointCloudXYZRGBN &pcd, ImageMsg &img, PointCloudXYZRGBN &pcd_color)
 {
     auto frame_id = img.header.frame_id;
     if (params.extrinsics_T_CI.find(frame_id) == params.extrinsics_T_CI.end())
@@ -184,6 +184,7 @@ void ColormapNode::mapPinHole(PointCloudXYZRGBN &pcd, ImageMsg &img)
     logger->info("Decoded");
 
     int mapped = 0;
+    pcd_color.clear();
     for (auto &pt : pcd.points)
     {
         Eigen::Vector3d pt_imu(pt.x, pt.y, pt.z);
@@ -201,6 +202,7 @@ void ColormapNode::mapPinHole(PointCloudXYZRGBN &pcd, ImageMsg &img)
             pt.r = color[2];
             pt.g = color[1];
             pt.b = color[0];
+            pcd_color.push_back(pt);
             mapped++;
         }
     }
@@ -224,20 +226,23 @@ void ColormapNode::colorizePointCloud(ColormapNode::FrameGroup &g)
         return;
     }
 
+    PointCloudXYZRGBN::Ptr pcd_color(new PointCloudXYZRGBN);
+    PointCloudXYZRGBN sub_pcd;
     for (auto &img : g.imgs)
     {
-        mapPinHole(*(g.pcd), *img);
+        mapPinHole(*(g.pcd), *img, sub_pcd);
+        *pcd_color += sub_pcd;
     }
 
     auto pos = g.pcd->sensor_origin_.head<3>();
     auto orient = g.pcd->sensor_orientation_;
-    pcl::transformPointCloud(*(g.pcd), *(g.pcd), pos, orient);
+    pcl::transformPointCloud(*pcd_color, *pcd_color, pos, orient);
     if (params.z_filter > 0)
     {
-        filterPointCloud(g.pcd, params.z_filter);
+        filterPointCloud(pcd_color, params.z_filter);
     }
     PointCloud2Msg pcd_msg;
-    pcl::toROSMsg(*(g.pcd), pcd_msg);
+    pcl::toROSMsg(*pcd_color, pcd_msg);
     pcd_msg.header.stamp = rclcpp::Time(g.pcd->header.stamp * 1e6); // ms to ns
     pcd_msg.header.frame_id = "camera_init";
     color_publisher->publish(pcd_msg);

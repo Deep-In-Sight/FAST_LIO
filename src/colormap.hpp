@@ -56,7 +56,7 @@ class ColormapNode : public rclcpp::Node
     void printParameters();
     void cameraCallback(ImageMsg::SharedPtr msg);
     FrameGroup sync();
-    void mapPinHole(PointCloudXYZRGBN &pcd, ImageMsg &img);
+    void mapPinHole(PointCloudXYZRGBN &pcd, ImageMsg &img, PointCloudXYZRGBN &pcd_color);
     void colorizePointCloud(FrameGroup &g);
     void worker();
 
