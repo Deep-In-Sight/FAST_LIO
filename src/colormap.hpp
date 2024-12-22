@@ -9,6 +9,7 @@
 #include <sensor_msgs/msg/compressed_image.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <std_srvs/srv/trigger.hpp>
 #include <thread>
 
 typedef pcl::PointXYZRGBNormal PointRGBType;
@@ -55,6 +56,8 @@ class ColormapNode : public rclcpp::Node
     void initParameters();
     void printParameters();
     void cameraCallback(ImageMsg::SharedPtr msg);
+    void mapSaveCallback(const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
+                         std::shared_ptr<std_srvs::srv::Trigger::Response> response);
     FrameGroup sync();
     void mapPinHole(PointCloudXYZRGBN &pcd, ImageMsg &img, PointCloudXYZRGBN &pcd_color);
     void colorizePointCloud(FrameGroup &g);
@@ -65,9 +68,11 @@ class ColormapNode : public rclcpp::Node
     bool running;
 
     ColormapParams params;
+    PointCloudXYZRGBN global_pcd;
 
     rclcpp::Subscription<ImageMsg>::SharedPtr image_subscriber;
     rclcpp::Publisher<PointCloud2Msg>::SharedPtr color_publisher;
+    rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr map_save_service;
 
     std::deque<PointCloudXYZRGBN::Ptr> pointcloud_queue;
     std::deque<ImageMsg::SharedPtr> image_msg_queue;

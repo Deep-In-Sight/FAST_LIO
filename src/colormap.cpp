@@ -199,9 +199,9 @@ void ColormapNode::mapPinHole(PointCloudXYZRGBN &pcd, ImageMsg &img, PointCloudX
         if (front && in && fov_in)
         {
             cv::Vec3b color = img_cv.at<cv::Vec3b>(v, u);
-            pt.r = color[2];
+            pt.r = color[0];
             pt.g = color[1];
-            pt.b = color[0];
+            pt.b = color[2];
             pcd_color.push_back(pt);
             mapped++;
         }
@@ -241,6 +241,9 @@ void ColormapNode::colorizePointCloud(ColormapNode::FrameGroup &g)
     {
         filterPointCloud(pcd_color, params.z_filter);
     }
+
+    global_pcd += *pcd_color;
+
     PointCloud2Msg pcd_msg;
     pcl::toROSMsg(*pcd_color, pcd_msg);
     pcd_msg.header.stamp = rclcpp::Time(g.pcd->header.stamp * 1e6); // ms to ns
@@ -267,6 +270,13 @@ void ColormapNode::worker()
     }
 }
 
+void ColormapNode::mapSaveCallback(const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
+                                   std::shared_ptr<std_srvs::srv::Trigger::Response> response)
+{
+    pcl::PCDWriter pcd_writer;
+    pcd_writer.writeBinary("color.pcd", global_pcd);
+}
+
 ColormapNode::ColormapNode(const rclcpp::NodeOptions &options) : Node("colormap_node")
 {
     logger->flush_on(spdlog::level::info);
@@ -284,6 +294,8 @@ ColormapNode::ColormapNode(const rclcpp::NodeOptions &options) : Node("colormap_
     image_subscriber = this->create_subscription<ImageMsg>(
         params.camera_topic, qos, std::bind(&ColormapNode::cameraCallback, this, std::placeholders::_1));
     color_publisher = this->create_publisher<PointCloud2Msg>(params.pcd_topic, qos);
+    map_save_service = this->create_service<std_srvs::srv::Trigger>(
+        "colormap_save", std::bind(&ColormapNode::mapSaveCallback, this, std::placeholders::_1, std::placeholders::_2));
 
     running = true;
     colorize_thread = new std::thread(&ColormapNode::worker, this);

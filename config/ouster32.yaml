@@ -39,8 +39,8 @@
             topic: "/camera" # all cameras publish on the same topics, distinguish by frame_id
             pcd_topic: "/colored_cloud"
             z_filter: 2.7 # set to something > 0 to remove the ceiling
-            intrinsics: [960.0, 0.0, 960.0,
-                    0.0, 960.0, 600.0,
+            intrinsics: [819.917458045, 0.0, 960.0,
+                    0.0, 819.917458045, 600.0,
                     0.0, 0.0, 1.0] # fx,0,cx,0,fy,cy,0,0,1
             time_offset: 0.0  
             front:
