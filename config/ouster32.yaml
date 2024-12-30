@@ -41,12 +41,12 @@
             topic: "/camera" # all cameras publish on the same topics, distinguish by frame_id
             pcd_topic: "/colored_cloud"
             z_filter: 2.7 # set to something > 0 to remove the ceiling
-            intrinsics: [819.917458045, 0.0, 960.0,
-                    0.0, 819.917458045, 600.0,
-                    0.0, 0.0, 1.0] # fx,0,cx,0,fy,cy,0,0,1
             time_offset: 0.0  
             front:
                 frame_id: "cam_front"
+                intrinsics: [819.917458045, 0.0, 960.0,
+                            0.0, 819.917458045, 600.0,
+                            0.0, 0.0, 1.0] # fx,0,cx,0,fy,cy,0,0,1
                 extrinsic_T: [ 0.05, 0.0, -0.05 ] # imu to camera
                 extrinsic_R: [ 0.0,  0.0,  1.0,
                             -1.0,  0.0,  0.0,
@@ -54,6 +54,9 @@
                 fov: [ -45.0, 45.0] # not the lens fov, but rather the fov to do limit colormap
             left:
                 frame_id: "cam_left"
+                intrinsics: [819.917458045, 0.0, 960.0,
+                            0.0, 819.917458045, 600.0,
+                            0.0, 0.0, 1.0] # fx,0,cx,0,fy,cy,0,0,1
                 extrinsic_T: [ 0.0, 0.05, -0.05 ] 
                 extrinsic_R: [ 1.0,  0.0,  0.0,
                             0.0,  0.0, 1.0,
@@ -61,6 +64,9 @@
                 fov: [ 45.0, 135.0 ]
             right:
                 frame_id: "cam_right"
+                intrinsics: [819.917458045, 0.0, 960.0,
+                            0.0, 819.917458045, 600.0,
+                            0.0, 0.0, 1.0] # fx,0,cx,0,fy,cy,0,0,1
                 extrinsic_T: [ 0.0, -0.05, -0.05 ] 
                 extrinsic_R: [ -1.0,  0.0, 0.0,
                             0.0,  0.0,  -1.0,

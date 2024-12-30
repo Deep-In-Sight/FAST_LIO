@@ -45,33 +45,33 @@ void ColormapNode::initParameters()
     this->declare_parameter<string>("camera.topic", "/camera");
     this->declare_parameter<string>("camera.pcd_topic", "/colored_cloud");
     this->declare_parameter<double>("camera.z_filter", 0.0);
-    this->declare_parameter<vector<double>>("camera.intrinsics", vector<double>());
     this->declare_parameter<double>("camera.time_offset", 0.0);
-    auto declare_extrinsics = [&](string frame_id) {
+    auto declare_intrinsics_extrinsics = [&](string frame_id) {
         this->declare_parameter<string>(frame_id + ".frame_id", frame_id);
+        this->declare_parameter<vector<double>>(frame_id + ".intrinsics", vector<double>());
         this->declare_parameter<vector<double>>(frame_id + ".extrinsic_T", vector<double>());
         this->declare_parameter<vector<double>>(frame_id + ".extrinsic_R", vector<double>());
         this->declare_parameter<vector<double>>(frame_id + ".fov", vector<double>());
     };
-    declare_extrinsics("camera.front");
-    declare_extrinsics("camera.left");
-    declare_extrinsics("camera.right");
+    declare_intrinsics_extrinsics("camera.front");
+    declare_intrinsics_extrinsics("camera.left");
+    declare_intrinsics_extrinsics("camera.right");
 
     bool success = true;
     success &= this->get_parameter_or("publish.color_en", params.publish_color_en, false);
     success &= this->get_parameter("camera.topic", params.camera_topic);
     success &= this->get_parameter("camera.pcd_topic", params.pcd_topic);
     success &= this->get_parameter("camera.z_filter", params.z_filter);
-    success &= this->get_parameter("camera.intrinsics", params.intrinsics);
     success &= this->get_parameter("camera.time_offset", params.time_offset);
-    auto get_extrinsics = [&](string frame_id) {
-        vector<double> T, R, fov;
+    auto get_intrinsics_extrinsics = [&](string frame_id) {
+        vector<double> T, R, fov, intrinsics;
         string key;
         success &= this->get_parameter(frame_id + ".frame_id", key);
+        success &= this->get_parameter(frame_id + ".intrinsics", intrinsics);
         success &= this->get_parameter(frame_id + ".extrinsic_T", T);
         success &= this->get_parameter(frame_id + ".extrinsic_R", R);
         success &= this->get_parameter(frame_id + ".fov", fov);
-        success &= T.size() == 3 && R.size() == 9 && fov.size() == 2;
+        success &= T.size() == 3 && R.size() == 9 && fov.size() == 2 && intrinsics.size() == 9;
         success &= (fov[0] < fov[1]);
         if (success)
         {
@@ -80,11 +80,12 @@ void ColormapNode::initParameters()
             params.extrinsics_T_CI[key] = Eigen::Vector3d(T[0], T[1], T[2]);
             params.extrinsics_R_CI[key] = Eigen::Quaterniond(rot).normalized();
             params.fov[key] = Eigen::Vector2d(fov[0], fov[1]);
+            params.intrinsics[key] = intrinsics;
         }
     };
-    get_extrinsics("camera.front");
-    get_extrinsics("camera.left");
-    get_extrinsics("camera.right");
+    get_intrinsics_extrinsics("camera.front");
+    get_intrinsics_extrinsics("camera.left");
+    get_intrinsics_extrinsics("camera.right");
 
     if (!success)
     {
@@ -97,7 +98,10 @@ void ColormapNode::printParameters()
     logger->info("Camera topic: {}", params.camera_topic);
     logger->info("PCD topic: {}", params.pcd_topic);
     logger->info("Time offset: {}", params.time_offset);
-    logger->info("Intrinsics: [{}]", fmt::join(params.intrinsics, ", "));
+    for (const auto& [frame_id, intrinsics] : params.intrinsics) {
+        logger->info("Frame ID: {}", frame_id);
+        logger->info("Intrinsics: [{}]", fmt::join(intrinsics, ", "));
+    }
     for (auto &[frame_id, extrinsics] : params.extrinsics_T_CI)
     {
         logger->info("Frame ID: {}", frame_id);
@@ -163,15 +167,22 @@ void ColormapNode::mapPinHole(PointCloudXYZRGBN &pcd, ImageMsg &img, PointCloudX
         logger->warn("frame {} doesn't exist", frame_id);
         return;
     }
+    if (params.intrinsics.find(frame_id) == params.intrinsics.end()) 
+    {
+        logger->warn("Frame {} doesn't exist or intrinsics missing", frame_id);
+        return;
+    }
     logger->info("Map frame {}", frame_id);
 
     auto T = params.extrinsics_T_CI[frame_id];
     auto R = params.extrinsics_R_CI[frame_id];
     auto fov = params.fov[frame_id];
-    auto fx = params.intrinsics[0];
-    auto fy = params.intrinsics[4];
-    auto cx = params.intrinsics[2];
-    auto cy = params.intrinsics[5];
+    auto intrinsics = params.intrinsics[frame_id];
+
+    auto fx = intrinsics[0];
+    auto fy = intrinsics[4];
+    auto cx = intrinsics[2];
+    auto cy = intrinsics[5];
 
     // check if img is a sensor_msgs::msg::CompressedImage or sensor_msgs::msg::Image
     cv::Mat img_cv = cv::imdecode(cv::Mat(img.data), cv::IMREAD_UNCHANGED);
