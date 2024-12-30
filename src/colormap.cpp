@@ -187,15 +187,23 @@ void ColormapNode::mapPinHole(PointCloudXYZRGBN &pcd, ImageMsg &img, PointCloudX
     auto cy = intrinsics[5];
 
     // check if img is a sensor_msgs::msg::CompressedImage or sensor_msgs::msg::Image
+#ifndef ISAAC_SIM
+    cv::Mat img_cv = cv::Mat(img.height, img.width, CV_8UC3, const_cast<uint8_t *>(img.data.data()));
+    if (img_cv.empty())
+    {
+        logger->warn("Failed to decode image");
+        return;
+    }
+#else
     cv::Mat img_cv = cv::imdecode(cv::Mat(img.data), cv::IMREAD_UNCHANGED);
     if (img_cv.empty())
     {
         logger->warn("Failed to decode image");
         return;
     }
+#endif
 
     logger->info("Decoded");
-
     int mapped = 0;
     pcd_color.clear();
     for (auto &pt : pcd.points)
@@ -203,8 +211,16 @@ void ColormapNode::mapPinHole(PointCloudXYZRGBN &pcd, ImageMsg &img, PointCloudX
         Eigen::Vector3d pt_imu(pt.x, pt.y, pt.z);
         Eigen::Vector3d pt_cam = R.conjugate() * (pt_imu - T);
         bool front = pt_cam.z() > 0; // ros cam +z forward
+#ifndef ISAAC_SIM
+        double r = sqrt(pt_cam.x() * pt_cam.x() + pt_cam.y() * pt_cam.y() + pt_cam.z() * pt_cam.z());
+        double theta = atan2(pt_cam.y(), pt_cam.x());
+        double elevation = arccos(pt_cam.z() / r) * 57.295779513; // rad to deg
+        double u = elevation * cos(theta) * pixel_per_angle + cx;
+        double v = elevation * sin(theta) * pixel_per_angle + cy;
+#else
         double u = fx * pt_cam.x() / pt_cam.z() + cx;
         double v = fy * pt_cam.y() / pt_cam.z() + cy;
+#endif
         bool in = u >= 0 && u < img_cv.cols && v >= 0 && v < img_cv.rows;
         double azimuth = -360 * pt.curvature / 100 + 360;    // 0-100ms => 360-0deg
         azimuth = (azimuth < 180) ? azimuth : azimuth - 360; // [0:360] => [-180:180]
@@ -219,7 +235,6 @@ void ColormapNode::mapPinHole(PointCloudXYZRGBN &pcd, ImageMsg &img, PointCloudX
             mapped++;
         }
     }
-
     logger->info("Mapped {} points", mapped); // mapping time is minimal compared to decoding time
 }
 
@@ -301,6 +316,8 @@ ColormapNode::ColormapNode(const rclcpp::NodeOptions &options) : Node("colormap_
         logger->info("Colormap disabled, goodbye");
         return;
     }
+
+    pixel_per_angle = 1 / params.angle_per_pixel;
 
     auto qos = rclcpp::SensorDataQoS().reliable();
 

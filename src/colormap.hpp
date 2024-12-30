@@ -14,7 +14,12 @@
 
 typedef pcl::PointXYZRGBNormal PointRGBType;
 typedef pcl::PointCloud<PointRGBType> PointCloudXYZRGBN;
+#ifndef ISAAC_SIM
+typedef sensor_msgs::msg::Image ImageMsg;
+#else
 typedef sensor_msgs::msg::CompressedImage ImageMsg;
+#endif
+
 typedef sensor_msgs::msg::PointCloud2 PointCloud2Msg;
 
 class ColormapNode : public rclcpp::Node
@@ -82,4 +87,6 @@ class ColormapNode : public rclcpp::Node
     std::thread *colorize_thread;
 
     bool initialized = false;
+
+    double pixel_per_angle;
 };
