@@ -98,7 +98,13 @@ string map_file_path, lid_topic, imu_topic;
 
 double res_mean_last = 0.05, total_residual = 0.0;
 double last_timestamp_lidar = 0, last_timestamp_imu = -1.0;
+#ifndef ISAAC_SIM
+vector<double>       gyr_cov(3, 0.0);
+vector<double>       acc_cov(3, 0.0);
+double b_gyr_cov = 0.0001, b_acc_cov = 0.0001;
+#else
 double gyr_cov = 0.1, acc_cov = 0.1, b_gyr_cov = 0.0001, b_acc_cov = 0.0001;
+#endif
 double filter_size_corner_min = 0, filter_size_surf_min = 0, filter_size_map_min = 0, fov_deg = 0;
 double cube_len = 0, HALF_FOV_COS = 0, FOV_DEG = 0, total_distance = 0, lidar_end_time = 0, first_lidar_time = 0.0;
 int    effct_feat_num = 0, time_log_counter = 0, scan_count = 0, publish_count = 0;
@@ -894,8 +900,13 @@ LaserMappingNode::LaserMappingNode(const rclcpp::NodeOptions& options) : Node("l
     this->declare_parameter<double>("cube_side_length", 200.);
     this->declare_parameter<float>("mapping.det_range", 300.);
     this->declare_parameter<double>("mapping.fov_degree", 180.);
+#ifndef ISAAC_SIM
+    this->declare_parameter<vector<double>>("mapping.gyr_cov", std::vector<double>(3, 0.0));
+    this->declare_parameter<vector<double>>("mapping.acc_cov", std::vector<double>(3, 0.0));
+#else
     this->declare_parameter<double>("mapping.gyr_cov", 0.1);
     this->declare_parameter<double>("mapping.acc_cov", 0.1);
+#endif
     this->declare_parameter<double>("mapping.b_gyr_cov", 0.0001);
     this->declare_parameter<double>("mapping.b_acc_cov", 0.0001);
     this->declare_parameter<double>("preprocess.blind", 0.01);
@@ -930,8 +941,13 @@ LaserMappingNode::LaserMappingNode(const rclcpp::NodeOptions& options) : Node("l
     this->get_parameter_or<double>("cube_side_length",cube_len,200.f);
     this->get_parameter_or<float>("mapping.det_range",DET_RANGE,300.f);
     this->get_parameter_or<double>("mapping.fov_degree",fov_deg,180.f);
+#ifndef ISAAC_SIM
+    this->get_parameter_or<vector<double>>("mapping.gyr_cov", gyr_cov, std::vector<double>(3, 0.0));
+    this->get_parameter_or<vector<double>>("mapping.acc_cov", acc_cov, std::vector<double>(3, 0.0));
+#else
     this->get_parameter_or<double>("mapping.gyr_cov",gyr_cov,0.1);
     this->get_parameter_or<double>("mapping.acc_cov",acc_cov,0.1);
+#endif
     this->get_parameter_or<double>("mapping.b_gyr_cov",b_gyr_cov,0.0001);
     this->get_parameter_or<double>("mapping.b_acc_cov",b_acc_cov,0.0001);
     this->get_parameter_or<double>("preprocess.blind", p_pre->blind, 0.01);
@@ -973,8 +989,13 @@ LaserMappingNode::LaserMappingNode(const rclcpp::NodeOptions& options) : Node("l
     Lidar_T_wrt_IMU<<VEC_FROM_ARRAY(extrinT);
     Lidar_R_wrt_IMU<<MAT_FROM_ARRAY(extrinR);
     p_imu->set_extrinsic(Lidar_T_wrt_IMU, Lidar_R_wrt_IMU);
+#ifndef ISAAC_SIM
+    p_imu->set_gyr_cov(V3D(gyr_cov[0], gyr_cov[1], gyr_cov[2]));
+    p_imu->set_acc_cov(V3D(acc_cov[0], acc_cov[1], acc_cov[2]));
+#else
     p_imu->set_gyr_cov(V3D(gyr_cov, gyr_cov, gyr_cov));
     p_imu->set_acc_cov(V3D(acc_cov, acc_cov, acc_cov));
+#endif
     p_imu->set_gyr_bias_cov(V3D(b_gyr_cov, b_gyr_cov, b_gyr_cov));
     p_imu->set_acc_bias_cov(V3D(b_acc_cov, b_acc_cov, b_acc_cov));
 
