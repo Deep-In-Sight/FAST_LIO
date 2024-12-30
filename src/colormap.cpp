@@ -46,6 +46,7 @@ void ColormapNode::initParameters()
     this->declare_parameter<string>("camera.pcd_topic", "/colored_cloud");
     this->declare_parameter<double>("camera.z_filter", 0.0);
     this->declare_parameter<double>("camera.time_offset", 0.0);
+    this->declare_parameter<double>("camera.angle_per_pixel", 0.0);
     auto declare_intrinsics_extrinsics = [&](string frame_id) {
         this->declare_parameter<string>(frame_id + ".frame_id", frame_id);
         this->declare_parameter<vector<double>>(frame_id + ".intrinsics", vector<double>());
@@ -63,6 +64,7 @@ void ColormapNode::initParameters()
     success &= this->get_parameter("camera.pcd_topic", params.pcd_topic);
     success &= this->get_parameter("camera.z_filter", params.z_filter);
     success &= this->get_parameter("camera.time_offset", params.time_offset);
+    success &= this->get_parameter("camera.angle_per_pixel", params.angle_per_pixel);
     auto get_intrinsics_extrinsics = [&](string frame_id) {
         vector<double> T, R, fov, intrinsics;
         string key;

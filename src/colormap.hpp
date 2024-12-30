@@ -29,6 +29,7 @@ class ColormapNode : public rclcpp::Node
         std::string pcd_topic;
         double z_filter;
         double time_offset;
+        double angle_per_pixel;
         std::map<std::string, std::vector<double>> intrinsics;
         std::map<std::string, Eigen::Vector3d> extrinsics_T_CI; // from imu to camera
         std::map<std::string, Eigen::Quaterniond> extrinsics_R_CI;

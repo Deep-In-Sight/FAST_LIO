@@ -42,6 +42,7 @@
             pcd_topic: "/colored_cloud"
             z_filter: 2.7 # set to something > 0 to remove the ceiling
             time_offset: 0.0  
+            angle_per_pixel: 0.06435562966942021
             front:
                 frame_id: "cam_front"
                 intrinsics: [819.917458045, 0.0, 960.0,
