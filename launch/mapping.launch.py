@@ -8,6 +8,8 @@ from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch.conditions import IfCondition
 
 from launch_ros.actions import Node
+from launch.actions import TimerAction,ExecuteProcess
+from launch.substitutions import LaunchConfiguration
 
 
 def generate_launch_description():
@@ -50,11 +52,22 @@ def generate_launch_description():
                     {'use_sim_time': use_sim_time}],
         output='screen'
     )
-    rviz_node = Node(
-        package='rviz2',
-        executable='rviz2',
-        arguments=['-d', rviz_cfg],
-        condition=IfCondition(rviz_use)
+    # rviz_node = Node(
+    #     package='rviz2',
+    #     executable='rviz2',
+    #     arguments=['-d', rviz_cfg],
+    #     condition=IfCondition(rviz_use)
+    # )
+    
+    rosbag_node = TimerAction(
+        period=5.0,
+        actions=[
+            ExecuteProcess(
+                cmd = ['ros2', 'bag', 'play', '--qos-profile-overrides-path', '/ros2_ws/qos_profile.yaml', '/shared_data/office_sim_bag'],
+                name = 'rosbag_play',
+                output = 'screen'
+            )
+        ]
     )
 
     ld = LaunchDescription()
@@ -65,6 +78,7 @@ def generate_launch_description():
     ld.add_action(declare_rviz_config_path_cmd)
 
     ld.add_action(fast_lio_node)
-    ld.add_action(rviz_node)
+    # ld.add_action(rviz_node)
+    ld.add_action(rosbag_node)
 
     return ld
