@@ -8,7 +8,7 @@ from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch.conditions import IfCondition
 
 from launch_ros.actions import Node
-from launch.actions import TimerAction,ExecuteProcess
+from launch.actions import TimerAction,ExecuteProcess,Shutdown
 from launch.substitutions import LaunchConfiguration
 
 
@@ -50,7 +50,8 @@ def generate_launch_description():
         executable='fastlio_mapping',
         parameters=[PathJoinSubstitution([config_path, config_file]),
                     {'use_sim_time': use_sim_time}],
-        output='screen'
+        output='screen',
+        on_exit=Shutdown()
     )
     # rviz_node = Node(
     #     package='rviz2',
@@ -60,12 +61,13 @@ def generate_launch_description():
     # )
     
     rosbag_node = TimerAction(
-        period=5.0,
+        period=2.0,
         actions=[
             ExecuteProcess(
                 cmd = ['ros2', 'bag', 'play', '--qos-profile-overrides-path', '/ros2_ws/qos_profile.yaml', '/shared_data/office_sim_bag'],
                 name = 'rosbag_play',
-                output = 'screen'
+                output = 'screen',
+                on_exit = Shutdown()
             )
         ]
     )
