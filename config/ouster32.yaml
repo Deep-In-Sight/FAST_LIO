@@ -1,16 +1,16 @@
 /**:
     ros__parameters:
         feature_extract_enable: false
-        point_filter_num: 1
+        point_filter_num: 15
         max_iteration: 3
-        filter_size_surf: 0.5
-        filter_size_map: 0.5
+        filter_size_surf: 0.1
+        filter_size_map: 0.15
         cube_side_length: 1000.0
         runtime_pos_log_enable: false
         map_file_path: "./test.pcd"
 
         common:
-            lid_topic:  "/lidar"
+            lid_topic:  "/ouster/points"  # "/lidar"
             imu_topic:  "/imu/data"
             time_sync_en: false         # ONLY turn on when external time synchronization is really not possible
             time_offset_lidar_to_imu: 0.0 # Time offset between lidar and IMU calibrated by other algorithms, e.g. LI-Init (can be found in README).
@@ -23,8 +23,8 @@
             blind: 1.0
 
         mapping:
-            acc_cov: 0.5 # Isaac sim data
-            gyr_cov: 0.5 # Isaac sim data
+            acc_cov: 0.1 # Isaac sim data
+            gyr_cov: 0.15 # Isaac sim data
             # acc_cov: [5.25e-06, 4.92E-06, 4.60E-06] # real data
             # gyr_cov: [2.02E-06, 1.61E-06, 1.76E-06] # real data
             b_acc_cov: 0.0001
@@ -32,10 +32,14 @@
             fov_degree:    360.0
             det_range:     150.0
             extrinsic_est_en:  false      # true: enable the online estimation of IMU-LiDAR extrinsic
-            extrinsic_T: [ 0.0, 0.0, 0.05 ]
-            extrinsic_R: [1., 0., 0.,
-                        0., 1., 0.,
-                        0., 0., 1.]
+            extrinsic_T: [ 0.0, 0.0 , 99.915e-3] # Openzen
+            extrinsic_R: [1.0 ,0.0,  0.0,
+                            0.0 ,1.0,  0.0,
+                            0.0,  0.0 , 1.0 ]
+            # extrinsic_T: [ 6.253e-3, -11.775e-3, -30.55e-3] # OuSter-32
+            # extrinsic_R: [-1.0 ,0.0,  0.0,
+            #                 0.0 ,-1.0,  0.0,
+            #                 0.0,  0.0 , 1.0 ]
         
         camera:
             topic: "/camera" # all cameras publish on the same topics, distinguish by frame_id

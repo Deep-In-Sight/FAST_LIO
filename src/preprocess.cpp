@@ -199,6 +199,12 @@ void Preprocess::avia_handler(const livox_ros_driver2::msg::CustomMsg::UniquePtr
 }
 #endif
 
+template <typename PointT>
+inline bool pcl_isfinite(PointT& pt)
+{
+  return std::isfinite(pt.x) && std::isfinite(pt.y) && std::isfinite(pt.z);
+}
+
 void Preprocess::oust64_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &msg)
 {
   pl_surf.clear();
@@ -279,6 +285,9 @@ void Preprocess::oust64_handler(const sensor_msgs::msg::PointCloud2::UniquePtr &
                      pl_orig.points[i].z * pl_orig.points[i].z;
 
       if (range < (blind * blind))
+        continue;
+
+      if (!pcl_isfinite(pl_orig.points[i]))
         continue;
 
       Eigen::Vector3d pt_vec;
