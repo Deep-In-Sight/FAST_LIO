@@ -214,7 +214,7 @@ void ColormapNode::mapPinHole(PointCloudXYZRGBN &pcd, ImageMsg &img, PointCloudX
 #ifndef ISAAC_SIM
         double r = sqrt(pt_cam.x() * pt_cam.x() + pt_cam.y() * pt_cam.y() + pt_cam.z() * pt_cam.z());
         double theta = atan2(pt_cam.y(), pt_cam.x());
-        double elevation = arccos(pt_cam.z() / r) * 57.295779513; // rad to deg
+        double elevation = acos(pt_cam.z() / r) * 57.295779513; // rad to deg
         double u = elevation * cos(theta) * pixel_per_angle + cx;
         double v = elevation * sin(theta) * pixel_per_angle + cy;
 #else
