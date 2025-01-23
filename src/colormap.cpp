@@ -28,7 +28,7 @@ void ColormapNode::queuePointCloud(PointCloudXYZRGBN::Ptr &pcd)
 {
     std::lock_guard<std::mutex> lock(mtx);
     double pcd_time_ms = pcd->header.stamp;
-    if (!image_msg_queue.empty() && pcd_time_ms >= time_ms(image_msg_queue.front()))
+    if(!params.publish_color_en || !image_msg_queue.empty() && pcd_time_ms >= time_ms(image_msg_queue.front()))
     {
         pointcloud_queue.push_back(pcd);
         cv.notify_all();
@@ -161,6 +161,16 @@ ColormapNode::FrameGroup ColormapNode::sync()
     return g;
 }
 
+ColormapNode::FrameGroup ColormapNode::sync_nocam()
+{
+    ColormapNode::FrameGroup g;
+
+    g.pcd = pointcloud_queue.front();
+    pointcloud_queue.pop_front();
+
+    return g;
+}
+
 void ColormapNode::mapPinHole(PointCloudXYZRGBN &pcd, ImageMsg &img, PointCloudXYZRGBN &pcd_color)
 {
     auto frame_id = img.header.frame_id;
@@ -238,6 +248,22 @@ void ColormapNode::mapPinHole(PointCloudXYZRGBN &pcd, ImageMsg &img, PointCloudX
     logger->info("Mapped {} points", mapped); // mapping time is minimal compared to decoding time
 }
 
+void ColormapNode::putColor(PointCloudXYZRGBN &pcd, PointCloudXYZRGBN &pcd_color)
+{
+    int mapped = 0;
+    pcd_color.clear();
+    cv::Vec3b color(255,255,255);
+    for (auto &pt : pcd.points)
+    {
+        pt.r = color[0];
+        pt.g = color[1];
+        pt.b = color[2];
+        pcd_color.push_back(pt);
+        mapped++;
+    }
+    logger->info("Mapped {} points", mapped); // mapping time is minimal compared to decoding time
+}
+
 void filterPointCloud(PointCloudXYZRGBN::Ptr cloud, float z_limit)
 {
     pcl::PassThrough<PointCloudXYZRGBN::PointType> pass;
@@ -279,6 +305,30 @@ void ColormapNode::colorizePointCloud(ColormapNode::FrameGroup &g)
     color_publisher->publish(pcd_msg);
 }
 
+void ColormapNode::colorizePointCloud_nocam(ColormapNode::FrameGroup &g)
+{
+    PointCloudXYZRGBN::Ptr pcd_color(new PointCloudXYZRGBN);
+    PointCloudXYZRGBN sub_pcd;
+    putColor(*(g.pcd), sub_pcd);
+    *pcd_color += sub_pcd;
+
+    auto pos = g.pcd->sensor_origin_.head<3>();
+    auto orient = g.pcd->sensor_orientation_;
+    pcl::transformPointCloud(*pcd_color, *pcd_color, pos, orient);
+    if (params.z_filter > 0)
+    {
+        filterPointCloud(pcd_color, params.z_filter);
+    }
+
+    global_pcd += *pcd_color;
+
+    PointCloud2Msg pcd_msg;
+    pcl::toROSMsg(*pcd_color, pcd_msg);
+    pcd_msg.header.stamp = rclcpp::Time(g.pcd->header.stamp * 1e6); // ms to ns
+    pcd_msg.header.frame_id = "camera_init";
+    color_publisher->publish(pcd_msg);
+}
+
 void ColormapNode::worker()
 {
     while (running)
@@ -298,6 +348,25 @@ void ColormapNode::worker()
     }
 }
 
+void ColormapNode::worker_nocam()
+{
+    while (running)
+    {
+        ColormapNode::FrameGroup g;
+        {
+            std::unique_lock<std::mutex> lock(mtx);
+            cv.wait(lock, [&] {
+                auto buffer_ready = !pointcloud_queue.empty();
+                return !running || buffer_ready;
+            });
+
+            g = sync_nocam();
+        }
+
+        colorizePointCloud_nocam(g);
+    }
+}
+
 void ColormapNode::mapSaveCallback(const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
                                    std::shared_ptr<std_srvs::srv::Trigger::Response> response)
 {
@@ -311,24 +380,30 @@ ColormapNode::ColormapNode(const rclcpp::NodeOptions &options) : Node("colormap_
     initParameters();
     printParameters();
 
-    if (!params.publish_color_en)
-    {
-        logger->info("Colormap disabled, goodbye");
-        return;
-    }
-
-    pixel_per_angle = 1 / params.angle_per_pixel;
 
     auto qos = rclcpp::SensorDataQoS().reliable();
 
-    image_subscriber = this->create_subscription<ImageMsg>(
-        params.camera_topic, qos, std::bind(&ColormapNode::cameraCallback, this, std::placeholders::_1));
     color_publisher = this->create_publisher<PointCloud2Msg>(params.pcd_topic, qos);
     map_save_service = this->create_service<std_srvs::srv::Trigger>(
         "colormap_save", std::bind(&ColormapNode::mapSaveCallback, this, std::placeholders::_1, std::placeholders::_2));
 
+    if (params.publish_color_en)
+    {
+        pixel_per_angle = 1 / params.angle_per_pixel;
+        image_subscriber = this->create_subscription<ImageMsg>(
+            params.camera_topic, qos, std::bind(&ColormapNode::cameraCallback, this, std::placeholders::_1));
+    }
+
     running = true;
-    colorize_thread = new std::thread(&ColormapNode::worker, this);
+    if(params.publish_color_en)
+    {
+        colorize_thread = new std::thread(&ColormapNode::worker, this);
+    }
+    else
+    {
+        colorize_thread = new std::thread(&ColormapNode::worker_nocam, this);
+    }
+    
     initialized = true;
 }
 

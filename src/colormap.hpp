@@ -65,9 +65,13 @@ class ColormapNode : public rclcpp::Node
     void mapSaveCallback(const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
                          std::shared_ptr<std_srvs::srv::Trigger::Response> response);
     FrameGroup sync();
+    FrameGroup sync_nocam();
     void mapPinHole(PointCloudXYZRGBN &pcd, ImageMsg &img, PointCloudXYZRGBN &pcd_color);
+    void putColor(PointCloudXYZRGBN &pcd, PointCloudXYZRGBN &pcd_color);
     void colorizePointCloud(FrameGroup &g);
+    void colorizePointCloud_nocam(FrameGroup &g);
     void worker();
+    void worker_nocam();
 
     ColormapNode(const rclcpp::NodeOptions &options = rclcpp::NodeOptions());
 

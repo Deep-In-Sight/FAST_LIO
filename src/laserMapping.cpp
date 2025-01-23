@@ -1016,7 +1016,14 @@ LaserMappingNode::LaserMappingNode(const rclcpp::NodeOptions& options) : Node("l
     else
         cout << "~~~~"<<ROOT_DIR<<" doesn't exist" << endl;
 
+
+#ifdef ISAAC_SIM
     auto qos = rclcpp::QoS(10).keep_all().reliable();
+    sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic, qos, imu_cbk);
+#else
+    auto qos = rclcpp::SensorDataQoS();
+    sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic, 10, imu_cbk);
+#endif
     /*** ROS subscribe initialization ***/
 #ifdef USE_LIVOX
     if (p_pre->lidar_type == AVIA)
@@ -1028,7 +1035,6 @@ LaserMappingNode::LaserMappingNode(const rclcpp::NodeOptions& options) : Node("l
     {
         sub_pcl_pc_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(lid_topic, qos, standard_pcl_cbk);
     }
-    sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic, qos, imu_cbk);
     pubLaserCloudFull_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered", 20);
     pubLaserCloudFull_body_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered_body", 20);
     pubLaserCloudEffect_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_effected", 20);
