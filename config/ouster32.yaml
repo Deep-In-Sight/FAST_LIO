@@ -25,8 +25,10 @@
         mapping:
             # acc_cov: 0.1 # Isaac sim data
             # gyr_cov: 0.15 # Isaac sim data
-            acc_cov: [5.25e-06, 4.92E-06, 4.60E-06] # real data
-            gyr_cov: [2.02E-06, 1.61E-06, 1.76E-06] # real data
+            # acc_cov: [5.25e-06, 4.92E-06, 4.60E-06] # real data
+            # gyr_cov: [2.02E-06, 1.61E-06, 1.76E-06] # real data
+            acc_cov: [0.1, 0.1, 0.1] # real data
+            gyr_cov: [0.15, 0.15, 0.15] # real data
             b_acc_cov: 0.0001
             b_gyr_cov: 0.0001
             fov_degree:    360.0
