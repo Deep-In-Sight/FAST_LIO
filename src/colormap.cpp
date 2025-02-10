@@ -223,6 +223,7 @@ void ColormapNode::mapPinHole(PointCloudXYZRGBN &pcd, ImageMsg &img, PointCloudX
         Eigen::Vector3d pt_imu(pt.x, pt.y, pt.z);
         Eigen::Vector3d pt_cam = R.conjugate() * (pt_imu - T);
         bool front = pt_cam.z() > 0; // ros cam +z forward
+        double azimuth = -360 * pt.curvature / 100 + 360;    // 0-100ms => 360-0deg
 #ifndef ISAAC_SIM
         double r = sqrt(pt_cam.x() * pt_cam.x() + pt_cam.y() * pt_cam.y() + pt_cam.z() * pt_cam.z());
         double theta = atan2(pt_cam.y(), pt_cam.x());
@@ -232,10 +233,9 @@ void ColormapNode::mapPinHole(PointCloudXYZRGBN &pcd, ImageMsg &img, PointCloudX
 #else
         double u = fx * pt_cam.x() / pt_cam.z() + cx;
         double v = fy * pt_cam.y() / pt_cam.z() + cy;
+        azimuth = (azimuth < 180) ? azimuth : azimuth - 360; // [0:360] => [-180:180]
 #endif
         bool in = u >= 0 && u < img_cv.cols && v >= 0 && v < img_cv.rows;
-        double azimuth = -360 * pt.curvature / 100 + 360;    // 0-100ms => 360-0deg
-        azimuth = (azimuth < 180) ? azimuth : azimuth - 360; // [0:360] => [-180:180]
         bool fov_in = azimuth >= fov[0] && azimuth <= fov[1];
         if (front && in && fov_in)
         {
