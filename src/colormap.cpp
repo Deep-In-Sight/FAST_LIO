@@ -134,23 +134,25 @@ ColormapNode::FrameGroup ColormapNode::sync()
     g.pcd = pointcloud_queue.front();
     pointcloud_queue.pop_front();
     double pcd_times_ms = g.pcd->header.stamp;
-    double threshold = 1.0; // allow 1ms difference
+    double threshold = 50.0; // allow 1ms difference
+    double diff = 0.0;
     while (!image_msg_queue.empty())
     {
         auto img_time_ms = time_ms(image_msg_queue.front());
-        if (img_time_ms < pcd_times_ms - threshold)
-        {
-            logger->warn("Dropping stale image");
-            image_msg_queue.pop_front();
-        }
-        else if (img_time_ms < pcd_times_ms + threshold)
+        diff = pcd_times_ms - img_time_ms;
+        if (abs(diff) < threshold)
         {
             g.imgs.push_back(image_msg_queue.front());
             image_msg_queue.pop_front();
         }
-        else
+        else if (diff < 0)
         {
             break;
+        }
+        else 
+        {
+            logger->warn("Dropping stale image");
+            image_msg_queue.pop_front();
         }
     }
     if (g.imgs.size() != params.extrinsics_T_CI.size())

@@ -44,7 +44,7 @@
             #                 0.0,  0.0 , 1.0 ]
         
         camera:
-            topic: "/camera" # all cameras publish on the same topics, distinguish by frame_id
+            topic: "/camera/image_raw" # all cameras publish on the same topics, distinguish by frame_id
             pcd_topic: "/colored_cloud"
             z_filter: 2.7 # set to something > 0 to remove the ceiling
             time_offset: 0.0  
