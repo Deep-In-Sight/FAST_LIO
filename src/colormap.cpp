@@ -47,6 +47,7 @@ void ColormapNode::initParameters()
     this->declare_parameter<double>("camera.z_filter", 0.0);
     this->declare_parameter<double>("camera.time_offset", 0.0);
     this->declare_parameter<double>("camera.angle_per_pixel", 0.0);
+    this->declare_parameter<vector<double>>("camera.ref_to_real_ratio_coeff", vector<double>());
     auto declare_intrinsics_extrinsics = [&](string frame_id) {
         this->declare_parameter<string>(frame_id + ".frame_id", frame_id);
         this->declare_parameter<vector<double>>(frame_id + ".intrinsics", vector<double>());
@@ -65,6 +66,9 @@ void ColormapNode::initParameters()
     success &= this->get_parameter("camera.z_filter", params.z_filter);
     success &= this->get_parameter("camera.time_offset", params.time_offset);
     success &= this->get_parameter("camera.angle_per_pixel", params.angle_per_pixel);
+    std::vector<double> ref_to_real_ratio_coeff_vec;
+    success &= this->get_parameter("camera.ref_to_real_ratio_coeff", ref_to_real_ratio_coeff_vec);
+    params.ref_to_real_ratio_coeff = Eigen::Map<Eigen::VectorXd>(ref_to_real_ratio_coeff_vec.data(), ref_to_real_ratio_coeff_vec.size());
     auto get_intrinsics_extrinsics = [&](string frame_id) {
         vector<double> T, R, fov, intrinsics;
         string key;
@@ -110,6 +114,14 @@ void ColormapNode::printParameters()
         logger->info("Extrinsic T: [{}]", fmt::join(extrinsics, ", "));
         // logger->info("Extrinsic R: [{}]", fmt::join(params.extrinsics_R_CI[frame_id], ", "));
     }
+}
+
+double ColormapNode::poly_eval(const Eigen::VectorXd &coeffs, double x) {
+    double result = 0.0;
+    for (int i = 0; i < coeffs.size(); ++i) {
+        result = result * x + coeffs[i];
+    }
+    return result;
 }
 
 void ColormapNode::cameraCallback(ImageMsg::SharedPtr msg)
@@ -225,11 +237,14 @@ void ColormapNode::mapPinHole(PointCloudXYZRGBN &pcd, ImageMsg &img, PointCloudX
         bool front = pt_cam.z() > 0; // ros cam +z forward
         double azimuth = -360 * pt.curvature / 100 + 360;    // 0-100ms => 360-0deg
 #ifndef ISAAC_SIM
-        double r = sqrt(pt_cam.x() * pt_cam.x() + pt_cam.y() * pt_cam.y() + pt_cam.z() * pt_cam.z());
-        double theta = atan2(pt_cam.y(), pt_cam.x());
-        double elevation = acos(pt_cam.z() / r) * 57.295779513; // rad to deg
-        double u = elevation * cos(theta) * pixel_per_angle + cx;
-        double v = elevation * sin(theta) * pixel_per_angle + cy;
+        double ref = sqrt(pt_cam.x() * pt_cam.x() + pt_cam.y() * pt_cam.y() + pt_cam.z() * pt_cam.z());
+        double ref_to_real_ratio = poly_eval(params.ref_to_real_ratio_coeff, ref);
+        double phi = atan2(pt_cam.y(), pt_cam.x());
+        double theta = acos(pt_cam.z() / ref) * 57.295779513; // rad to deg
+        double u = theta * cos(phi) * pixel_per_angle + cx;
+        double v = theta * sin(phi) * pixel_per_angle + cy;
+        u *= ref_to_real_ratio;
+        v *= ref_to_real_ratio;
 #else
         double u = fx * pt_cam.x() / pt_cam.z() + cx;
         double v = fy * pt_cam.y() / pt_cam.z() + cy;

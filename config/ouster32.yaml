@@ -49,6 +49,8 @@
             z_filter: 2.7 # set to something > 0 to remove the ceiling
             time_offset: 0.0  
             angle_per_pixel: 0.06435562966942021
+            ref_to_real_ratio_coeff: [-6.63410062e-21,  1.51539599e-17, -1.42651997e-14,  1.00351854e-11,
+                                -3.96009607e-08,  3.22675968e-07,  9.99990254e-01]
             front:
                 frame_id: "cam_front"
                 intrinsics: [819.917458045, 0.0, 1228.0,

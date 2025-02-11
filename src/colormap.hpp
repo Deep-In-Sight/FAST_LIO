@@ -35,6 +35,7 @@ class ColormapNode : public rclcpp::Node
         double z_filter;
         double time_offset;
         double angle_per_pixel;
+        Eigen::VectorXd ref_to_real_ratio_coeff;
         std::map<std::string, std::vector<double>> intrinsics;
         std::map<std::string, Eigen::Vector3d> extrinsics_T_CI; // from imu to camera
         std::map<std::string, Eigen::Quaterniond> extrinsics_R_CI;
@@ -61,6 +62,7 @@ class ColormapNode : public rclcpp::Node
   private:
     void initParameters();
     void printParameters();
+    double poly_eval(const Eigen::VectorXd &coeffs, double x);
     void cameraCallback(ImageMsg::SharedPtr msg);
     void mapSaveCallback(const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
                          std::shared_ptr<std_srvs::srv::Trigger::Response> response);
