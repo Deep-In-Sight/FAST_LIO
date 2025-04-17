@@ -95,6 +95,7 @@ condition_variable sig_buffer;
 
 string root_dir = ROOT_DIR;
 string map_file_path, lid_topic, imu_topic;
+string result_odometry, odom_file_path;
 
 double res_mean_last = 0.05, total_residual = 0.0;
 double last_timestamp_lidar = 0, last_timestamp_imu = -1.0;
@@ -222,7 +223,7 @@ void RGBpointBodyToWorld(PointType const * const pi, PointType * const po)
 void RGBpointBodyLidarToIMU(PointType const * const pi, PointRGBType * const po)
 {
     V3D p_body_lidar(pi->x, pi->y, pi->z);
-    V3D p_body_imu(state_point.offset_R_L_I*p_body_lidar + state_point.offset_T_L_I);
+    V3D p_body_imu(state_point.offset_R_L_I * p_body_lidar + state_point.offset_T_L_I);
 
     po->x = p_body_imu(0);
     po->y = p_body_imu(1);
@@ -741,6 +742,11 @@ void publish_odometry(const rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPt
     trans.transform.rotation.y = odomAftMapped.pose.pose.orientation.y;
     trans.transform.rotation.z = odomAftMapped.pose.pose.orientation.z;
     tf_br->sendTransform(trans);
+
+    // save timestamp and pose and rotatino to file
+    result_odometry += std::to_string(static_cast<long long>(std::round(lidar_end_time*1e9))) + "\n"; 
+    result_odometry += std::to_string(state_point.pos(0)) + " " + std::to_string(state_point.pos(1)) + " " + std::to_string(state_point.pos(2)) + "\n";
+    result_odometry += std::to_string(state_point.rot.x()) + " " + std::to_string(state_point.rot.y()) + " " + std::to_string(state_point.rot.z()) + " " + std::to_string(state_point.rot.w()) + "\n\n";
 }
 
 void publish_path(rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubPath)
@@ -1022,7 +1028,7 @@ LaserMappingNode::LaserMappingNode(const rclcpp::NodeOptions& options) : Node("l
     sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic, qos, imu_cbk);
 #else
     auto qos = rclcpp::SensorDataQoS();
-    sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic, 10, imu_cbk);
+    sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic,  rclcpp::QoS(10).keep_all().best_effort(),  imu_cbk);
 #endif
     /*** ROS subscribe initialization ***/
 #ifdef USE_LIVOX
@@ -1051,6 +1057,8 @@ LaserMappingNode::LaserMappingNode(const rclcpp::NodeOptions& options) : Node("l
     map_pub_timer_ = rclcpp::create_timer(this, this->get_clock(), map_period_ms, std::bind(&LaserMappingNode::map_publish_callback, this));
 
     map_save_srv_ = this->create_service<std_srvs::srv::Trigger>("map_save", std::bind(&LaserMappingNode::map_save_callback, this, std::placeholders::_1, std::placeholders::_2));
+    odom_save_srv_ = this->create_service<std_srvs::srv::Trigger>("odom_save", std::bind(&LaserMappingNode::odom_save_callback, this, std::placeholders::_1, std::placeholders::_2));
+
 
     RCLCPP_INFO(this->get_logger(), "Node init finished.");
 }
@@ -1243,6 +1251,24 @@ void LaserMappingNode::map_save_callback(std_srvs::srv::Trigger::Request::ConstS
     }
 }
 
+void LaserMappingNode::odom_save_callback(std_srvs::srv::Trigger::Request::ConstSharedPtr req, std_srvs::srv::Trigger::Response::SharedPtr res)
+{
+    odom_file_path = "odom.txt";
+    RCLCPP_INFO(this->get_logger(), "Saving odometry to %s...", odom_file_path.c_str());
+    std::ofstream outfile(odom_file_path);
+    if (outfile.is_open())
+    {
+        outfile << result_odometry;
+        outfile.close();
+        res->success = true;
+        res->message = "Odometry saved.";
+    }
+    else
+    {
+        res->success = false;
+        res->message = "Odometry save disabled.";
+    }
+}
 
 int saveEverything() 
 {

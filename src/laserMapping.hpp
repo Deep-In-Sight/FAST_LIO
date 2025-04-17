@@ -23,6 +23,8 @@ class LaserMappingNode : public rclcpp::Node
 
     void map_save_callback(std_srvs::srv::Trigger::Request::ConstSharedPtr req,
                            std_srvs::srv::Trigger::Response::SharedPtr res);
+    void odom_save_callback(std_srvs::srv::Trigger::Request::ConstSharedPtr req,
+                          std_srvs::srv::Trigger::Response::SharedPtr res);
 
   private:
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudFull_;
@@ -41,6 +43,7 @@ class LaserMappingNode : public rclcpp::Node
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::TimerBase::SharedPtr map_pub_timer_;
     rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr map_save_srv_;
+    rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr odom_save_srv_;
 
     bool effect_pub_en = false, map_pub_en = false;
     int effect_feat_num = 0, frame_num = 0;

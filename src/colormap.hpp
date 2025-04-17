@@ -4,6 +4,7 @@
 #include <mutex>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
+#include <pcl/io/ply_io.h>
 #include <queue>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/compressed_image.hpp>
@@ -14,11 +15,12 @@
 
 typedef pcl::PointXYZRGBNormal PointRGBType;
 typedef pcl::PointCloud<PointRGBType> PointCloudXYZRGBN;
-#ifndef ISAAC_SIM
-typedef sensor_msgs::msg::Image ImageMsg;
-#else
+// #ifndef ISAAC_SIM
+// typedef sensor_msgs::msg::Image ImageMsg;
+// #else
+// typedef sensor_msgs::msg::CompressedImage ImageMsg;
+// #endif
 typedef sensor_msgs::msg::CompressedImage ImageMsg;
-#endif
 
 typedef sensor_msgs::msg::PointCloud2 PointCloud2Msg;
 
@@ -30,15 +32,15 @@ class ColormapNode : public rclcpp::Node
     struct ColormapParams
     {
         bool publish_color_en;
+        bool color_compressed;
         std::string camera_topic;
         std::string pcd_topic;
         double z_filter;
         double time_offset;
-        double angle_per_pixel;
-        Eigen::VectorXd ref_to_real_ratio_coeff;
         std::map<std::string, std::vector<double>> intrinsics;
+        std::map<std::string, std::vector<double>> distortion;
         std::map<std::string, Eigen::Vector3d> extrinsics_T_CI; // from imu to camera
-        std::map<std::string, Eigen::Quaterniond> extrinsics_R_CI;
+        std::map<std::string, Eigen::Matrix3d> extrinsics_R_CI;
         std::map<std::string, Eigen::Vector2d> fov; // horizontal start and end in degs
     };
 
@@ -92,7 +94,6 @@ class ColormapNode : public rclcpp::Node
     std::condition_variable cv;
     std::thread *colorize_thread;
 
+    std::string cam_path_output;
     bool initialized = false;
-
-    double pixel_per_angle;
 };

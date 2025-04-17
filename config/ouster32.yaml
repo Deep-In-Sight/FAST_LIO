@@ -1,17 +1,19 @@
 /**:
     ros__parameters:
         feature_extract_enable: false
-        point_filter_num: 15
+        point_filter_num: 1 # 15
         max_iteration: 3
-        filter_size_surf: 0.1
-        filter_size_map: 0.15
+        filter_size_surf: 0.09 # 0.1
+        filter_size_map: 0.09 # 0.15
         cube_side_length: 1000.0
         runtime_pos_log_enable: false
         map_file_path: "./test.pcd"
 
         common:
             lid_topic:  "/ouster/points"  # "/lidar"
-            imu_topic:  "/imu/data"
+            # imu_topic:  "/imu/data"
+            imu_topic:  "/ouster/imu"
+            # imu_topic:  "/openzen/data"
             time_sync_en: false         # ONLY turn on when external time synchronization is really not possible
             time_offset_lidar_to_imu: 0.0 # Time offset between lidar and IMU calibrated by other algorithms, e.g. LI-Init (can be found in README).
                                         # This param will take effect no matter what time_sync_en is. So if the time offset is not known exactly, please set as 0.0
@@ -20,7 +22,7 @@
             lidar_type: 3                # 1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for ouster LiDAR, 
             scan_line: 32
             timestamp_unit: 3                 # 0-second, 1-milisecond, 2-microsecond, 3-nanosecond.
-            blind: 1.0
+            blind: 1.5 # 1.0
 
         mapping:
             # acc_cov: 0.1 # Isaac sim data
@@ -34,65 +36,77 @@
             fov_degree:    360.0
             det_range:     150.0
             extrinsic_est_en:  false      # true: enable the online estimation of IMU-LiDAR extrinsic
-            extrinsic_T: [ 0.0, 0.0 , 99.915e-3] # Openzen
-            extrinsic_R: [1.0 ,0.0,  0.0,
-                            0.0 ,1.0,  0.0,
+            # extrinsic_T: [-0.18696821,  0.00861757,  0.05879764] # Openzen
+            # extrinsic_R: [ 0.99997143, -0.00742266,  0.00143091,
+            #                 0.00741295,  0.99995022,  0.00667858,
+            #                 -0.00148041, -0.00666778,  0.99997667 ]
+            extrinsic_T: [ -6.253e-3, 11.775e-3, -30.55e-3] # OuSter-32 lidar to imu
+            extrinsic_R: [-1.0 ,0.0,  0.0,
+                            0.0 ,-1.0,  0.0,
                             0.0,  0.0 , 1.0 ]
-            # extrinsic_T: [ 6.253e-3, -11.775e-3, -30.55e-3] # OuSter-32
-            # extrinsic_R: [-1.0 ,0.0,  0.0,
-            #                 0.0 ,-1.0,  0.0,
-            #                 0.0,  0.0 , 1.0 ]
         
         camera:
-            topic: "/camera/image_raw" # all cameras publish on the same topics, distinguish by frame_id
+            topic: "/camera/image/compressed" # all cameras publish on the same topics, distinguish by frame_id
+            # topic : "/ecam_left/camera/image_raw"
             pcd_topic: "/colored_cloud"
-            z_filter: 2.7 # set to something > 0 to remove the ceiling
+            z_filter: 92.7 # set to something > 0 to remove the ceiling
             time_offset: 0.0  
-            angle_per_pixel: 0.06435562966942021
-            ref_to_real_ratio_coeff: [-6.63410062e-21,  1.51539599e-17, -1.42651997e-14,  1.00351854e-11,
-                                -3.96009607e-08,  3.22675968e-07,  9.99990254e-01]
             front:
-                frame_id: "cam_front"
-                intrinsics: [819.917458045, 0.0, 1228.0,
-                            0.0, 819.917458045, 1044.0,
+                frame_id: "mid"
+                intrinsics: [814.653, 0.0, 1222.64,
+                            0.0, 814.664, 1031.26,
                             0.0, 0.0, 1.0] # fx,0,cx,0,fy,cy,0,0,1
-                extrinsic_T: [-29.0e-3, 0.0, 51.305e-3] # imu to camera
-                extrinsic_R: [ 0.0,  0.0,  -1.0,
-                            1.0,  0.0,  0.0,
-                            0.0, -1.0,  0.0 ]
+                distortion: [-0.0240574, 0.00197223, -7.34436e-05, -0.000290023]  # k1, k2, k3 k4
+                # extrinsic_T: [-29.0e-3, 0.0, 51.305e-3] # openzen to camera
+                # extrinsic_R: [ 0.0,  0.0,  -1.0, # openzen to camera
+                #             1.0,  0.0,  0.0,
+                #             0.0, -1.0,  0.0 ]
+                extrinsic_T: [0.011764068527381997, 0.09055, -0.04372645828235276] # ouster sensor to camera
+                extrinsic_R: [ -0.0017453283658982466, -0.9999984769132878, 2.2204426673184403e-16,
+                                0.0, -2.220446049250313e-16, -1.0,
+                                0.9999984769132878, -0.0017453283658982466, 3.8754074747032665e-19]
+                # extrinsic_R: [-1.0, 0.0, 0.0,
+                #             0.0, -1.0, 0.0,
+                #             0.0, 0.0, 1.0]
                 # FOV start counterclockwise from x-axis (dimenvue screen side)
-                #     180
+                #     180(F)
                 #   /     \
-                # 270  .  90
+                # 270(L)  90 (R)
                 #   \     /
-                #      0
-                fov: [ 135.0, 225.0] # not the lens fov, but rather the fov to do limit colormap
+                #      0(B)
+                
+                fov: [135.0, 225.0]
+
             left:
-                frame_id: "cam_left"
-                intrinsics: [819.917458045, 0.0, 1212.0,
-                            0.0, 819.917458045, 1060.0,
+                frame_id: "left"
+                intrinsics: [816.438, 0.0, 1195.84,
+                            0.0, 816.541, 1056.53,
                             0.0, 0.0, 1.0] # fx,0,cx,0,fy,cy,0,0,1
-                extrinsic_T: [ 0.0, -29.0e-3, 51.305e-3 ] 
-                extrinsic_R: [ -1.0,  0.0,  0.0,
-                            0.0,  0.0, -1.0,
-                            0.0,  -1.0,  0.0 ]
+                distortion: [-0.0224236, -0.00119995, 0.00184372, -0.000722275]  # k1, k2, k3 k4
+                extrinsic_T: [6.04654555e-03, 8.05500000e-02, -7.18823365e-02]
+                extrinsic_R: [0.9998476951563913, 0.017452406437283637, -3.875212692357718e-18,
+                            0.0, -2.220446049250313e-16, -1.0,
+                            -0.017452406437283637, 0.9998476951563913, -2.2201078645620404e-16]
+                # fov: [ -135.0, -45.0 ]
                 fov: [ 225.0, 315.0 ]
             right:
-                frame_id: "cam_right"
-                intrinsics: [819.917458045, 0.0, 1204.0,
-                            0.0, 819.917458045, 1028.0,
+                frame_id: "right"
+                intrinsics: [812.223, 0.0, 1201.43,
+                            0.0, 812.03, 1035.2,
                             0.0, 0.0, 1.0] # fx,0,cx,0,fy,cy,0,0,1
-                extrinsic_T: [ 0.0, 29.0e-3, 51.305e-3] 
-                extrinsic_R: [ 1.0,  0.0, 0.0,
-                            0.0,  0.0,  1.0,
-                            0.0, -1.0,  0.0 ]
+                distortion: [-0.0220273, -0.000603854, 0.00146569, -0.000701104]  # k1, k2, k3 k4
+                extrinsic_T: [-6.45754972e-03, 1.00550000e-01, -3.83359233e-02]
+                extrinsic_R: [-0.9998476951563913, 0.01745240643728351, -3.8752126923576905e-18,
+                                0.0, -2.220446049250313e-16, -1.0,
+                                -0.01745240643728351, -0.9998476951563913, 2.2201078645620404e-16]
                 fov: [ 45.0, 135.0 ]
 
         publish:
             path_en:  true
-            color_en: true               # publish the color point cloud, must have scan_bodyframe_pub_en = true
-            scan_publish_en:  false      # publish the point cloud scans in global frame
-            dense_publish_en: false      # publish full lidar scan or down sampled scan
+            color_en: false               # publish the color point cloud, must have scan_bodyframe_pub_en = true
+            color_compressed: true       # publish the compressed color image
+            scan_publish_en:  true      # publish the point cloud scans in global frame
+            dense_publish_en: true      # publish full lidar scan or down sampled scan
             scan_bodyframe_pub_en: true  # true: output the point cloud scans in IMU-body-frame
 
         pcd_save:
