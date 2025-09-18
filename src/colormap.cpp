@@ -13,7 +13,11 @@ using namespace std;
 
 auto logger = spdlog::basic_logger_mt("colormap_node", "colormap_node.log", true);
 
-double time_ms(ImageMsg::SharedPtr &msg)
+// Forward declarations
+void filterPointCloud(PointCloudXYZRGBN::Ptr cloud, float z_limit);
+
+template<typename ImageType>
+double time_ms(typename ImageType::SharedPtr &msg)
 {
     return rclcpp::Time(msg->header.stamp).seconds() * 1000;
 }
@@ -24,29 +28,305 @@ ColormapNode::Ptr ColormapNode::getInstance()
     return instance;
 }
 
+bool ColormapNode::isEnabled()
+{
+    this->declare_parameter<bool>("camera.enable", false);
+    bool enable;
+    this->get_parameter("camera.enable", enable);
+    return enable;
+}
+
 void ColormapNode::queuePointCloud(PointCloudXYZRGBN::Ptr &pcd)
 {
     std::lock_guard<std::mutex> lock(mtx);
-    double pcd_time_ms = pcd->header.stamp;
-    if(!params.publish_color_en || !image_msg_queue.empty() && pcd_time_ms >= time_ms(image_msg_queue.front()))
-    {
-        pointcloud_queue.push_back(pcd);
-        cv.notify_all();
+    pointcloud_queue.push_back(pcd);
+    cv.notify_all();
+}
+
+void ColormapNode::queueOdometry(nav_msgs::msg::Odometry &odom)
+{
+    std::lock_guard<std::mutex> lock(mtx);
+    odom_queue.push_back(odom);
+    cv.notify_all();
+}
+
+template<typename ImageType>
+void ColormapNode::cameraCallback(typename ImageType::SharedPtr msg)
+{
+    std::lock_guard<std::mutex> lock(mtx);
+    auto msg_time = rclcpp::Time(msg->header.stamp).seconds();
+    
+    if constexpr (std::is_same_v<ImageType, sensor_msgs::msg::CompressedImage>) {
+        auto last_time = compressed_image_queue.empty() ? -1e10 : 
+            rclcpp::Time(compressed_image_queue.back()->header.stamp).seconds();
+        compressed_image_queue.push_back(msg);
+        if (msg_time < last_time) {
+            logger->warn("out of order");
+            std::sort(compressed_image_queue.begin(), compressed_image_queue.end(),
+                [](auto &a, auto &b) { return rclcpp::Time(a->header.stamp) < rclcpp::Time(b->header.stamp); });
+        }
+    } else {
+        auto last_time = image_queue.empty() ? -1e10 : 
+            rclcpp::Time(image_queue.back()->header.stamp).seconds();
+        image_queue.push_back(msg);
+        if (msg_time < last_time) {
+            logger->warn("out of order");
+            std::sort(image_queue.begin(), image_queue.end(),
+                [](auto &a, auto &b) { return rclcpp::Time(a->header.stamp) < rclcpp::Time(b->header.stamp); });
+        }
     }
-    else
+    cv.notify_all();
+}
+
+template<typename ImageType>
+ColormapNode::FrameGroup<ImageType> ColormapNode::sync()
+{
+    ColormapNode::FrameGroup<ImageType> g;
+
+    if (pointcloud_queue.empty() || odom_queue.empty()) {
+        return g;
+    }
+
+    // Get the first pointcloud and odometry
+    g.pcd = pointcloud_queue.front();
+    auto odom = odom_queue.front();
+
+    // Verify timestamps match
+    double pcd_time = rclcpp::Time(g.pcd->header.stamp).seconds();
+    double odom_time = rclcpp::Time(odom.header.stamp).seconds();
+    if (std::abs(pcd_time - odom_time) > 0.001) { // 1ms tolerance
+        logger->warn("Timestamp mismatch between pointcloud ({}) and odometry ({})", 
+                    pcd_time, odom_time);
+        return g;
+    }
+
+    // Remove processed messages
+    pointcloud_queue.pop_front();
+    odom_queue.pop_front();
+
+    // Process images
+    double threshold = 17.0; // 17ms
+    if constexpr (std::is_same_v<ImageType, sensor_msgs::msg::CompressedImage>) {
+        while (!compressed_image_queue.empty()) {
+            auto img_time = rclcpp::Time(compressed_image_queue.front()->header.stamp).seconds();
+            double diff = pcd_time - img_time;
+            
+            if (std::abs(diff) < threshold) {
+                g.imgs.push_back(compressed_image_queue.front());
+                compressed_image_queue.pop_front();
+            } else if (diff < 0) {
+                break;
+            } else {
+                logger->warn("Dropping stale image");
+                compressed_image_queue.pop_front();
+            }
+        }
+    } else {
+        while (!image_queue.empty()) {
+            auto img_time = rclcpp::Time(image_queue.front()->header.stamp).seconds();
+            double diff = pcd_time - img_time;
+            
+            if (std::abs(diff) < threshold) {
+                g.imgs.push_back(image_queue.front());
+                image_queue.pop_front();
+            } else if (diff < 0) {
+                break;
+            } else {
+                logger->warn("Dropping stale image");
+                image_queue.pop_front();
+            }
+        }
+    }
+
+    if (g.imgs.size() != params.extrinsics_T_CI.size()) {
+        logger->warn("Incomplete frame set {}/{}", g.imgs.size(), params.extrinsics_T_CI.size());
+    }
+
+    return g;
+}
+
+template<typename ImageType>
+void ColormapNode::colorizePointCloud(FrameGroup<ImageType> &g)
+{
+    if (g.imgs.empty()) {
+        return;
+    }
+
+    PointCloudXYZRGBN::Ptr pcd_color(new PointCloudXYZRGBN);
+    PointCloudXYZRGBN sub_pcd;
+
+    Eigen::Vector3f pos = g.pcd->sensor_origin_.template head<3>();
+    Eigen::Quaternionf orient = g.pcd->sensor_orientation_;
+    for (auto &img : g.imgs) {
+        mapPinHole(*(g.pcd), *img, sub_pcd);
+        *pcd_color += sub_pcd;
+
+        std::string frame_id = img->header.frame_id;
+        auto T = params.extrinsics_T_CI[frame_id];
+        auto R = params.extrinsics_R_CI[frame_id];  
+        Eigen::Vector3d cam_pos = R * pos.cast<double>() + T;
+        Eigen::Quaterniond rot_quat(R);
+        Eigen::Quaterniond cam_orient = rot_quat * orient.cast<double>();
+    }
+
+    pcl::transformPointCloud(*pcd_color, *pcd_color, pos, orient);
+    if (params.z_filter > 0) {
+        filterPointCloud(pcd_color, params.z_filter);
+    }
+
+    global_pcd += *pcd_color;
+
+    sensor_msgs::msg::PointCloud2 pcd_msg;
+    pcl::toROSMsg(*pcd_color, pcd_msg);
+    pcd_msg.header.stamp = rclcpp::Time(g.pcd->header.stamp); // ms to ns
+    pcd_msg.header.frame_id = "camera_init";
+    color_publisher->publish(pcd_msg);
+}
+
+template<typename ImageType>
+void ColormapNode::worker()
+{
+    while (running)
     {
-        logger->warn("Dropping early pointcloud");
+        FrameGroup<ImageType> g;
+        {
+            std::unique_lock<std::mutex> lock(mtx);
+            cv.wait(lock, [&] {
+                auto buffer_ready = !pointcloud_queue.empty() && !odom_queue.empty() && 
+                    ((std::is_same_v<ImageType, sensor_msgs::msg::CompressedImage> && compressed_image_queue.size() > 20) ||
+                     (std::is_same_v<ImageType, sensor_msgs::msg::Image> && image_queue.size() > 20));
+                return !running || buffer_ready;
+            });
+            g = sync<ImageType>();
+        }
+
+        if (!g.imgs.empty()) {
+            colorizePointCloud(g);
+        }
     }
 }
 
+template<typename ImageType>
+void ColormapNode::mapPinHole(PointCloudXYZRGBN &pcd, ImageType &img, PointCloudXYZRGBN &pcd_color)
+{
+    auto frame_id = img.header.frame_id;
+    logger->info("Map frame {}", frame_id);
+
+    if (params.extrinsics_T_CI.find(frame_id) == params.extrinsics_T_CI.end())
+    {
+        logger->warn("frame {} doesn't exist", frame_id);
+        return;
+    }
+    if (params.intrinsics.find(frame_id) == params.intrinsics.end()) 
+    {
+        logger->warn("Frame {} doesn't exist or intrinsics missing", frame_id);
+        return;
+    }
+
+    auto T = params.extrinsics_T_CI[frame_id];
+    auto R = params.extrinsics_R_CI[frame_id];
+    auto fov = params.fov[frame_id];
+    auto intrinsics = params.intrinsics[frame_id];
+    auto distortion = params.distortion[frame_id];
+
+    auto fx = intrinsics[0];
+    auto fy = intrinsics[4];
+    auto cx = intrinsics[2];
+    auto cy = intrinsics[5];
+    auto k1 = distortion[0];
+    auto k2 = distortion[1];
+    auto k3 = distortion[2];
+    auto k4 = distortion[3];
+
+    // Convert image to OpenCV format
+    cv::Mat img_cv;
+    if constexpr (std::is_same_v<ImageType, sensor_msgs::msg::CompressedImage>) {
+        img_cv = cv::imdecode(cv::Mat(img.data), cv::IMREAD_UNCHANGED);
+    } else if constexpr (std::is_same_v<ImageType, sensor_msgs::msg::Image>) {
+        if (img.encoding == "rgb8" || img.encoding == "bgr8") {
+            img_cv = cv::Mat(img.height, img.width, CV_8UC3, const_cast<uint8_t*>(img.data.data()));
+        } else {
+            logger->warn("Unsupported image encoding: {}", img.encoding);
+            return;
+        }
+    }
+
+    if (img_cv.empty()) {
+        logger->warn("Failed to convert image to OpenCV format");
+        return;
+    }
+
+    int mapped = 0;
+    pcd_color.clear();
+    
+    // Project points to image plane
+    for (auto &pt : pcd.points)
+    {
+        Eigen::Vector3d pt_imu(pt.x, pt.y, pt.z);
+        Eigen::Vector3d pt_cam = R * pt_imu + T;
+
+        if(pt_cam.z() <= 0) // ros cam +z forward
+            continue;
+
+        float a = static_cast<float>(pt_cam.x() / pt_cam.z());
+        float b = static_cast<float>(pt_cam.y() / pt_cam.z());
+        float r_val = std::sqrt(a * a + b * b);
+        float x_d = 0.0f, y_d = 0.0f;
+        if(r_val < 1e-6) {
+            x_d = 0.0f;
+            y_d = 0.0f;
+        } else {
+            float theta = std::atan(r_val);
+            float theta_d = theta * (1 + k1 * std::pow(theta,2) +
+                                     k2 * std::pow(theta,4) +
+                                     k3 * std::pow(theta,6) +
+                                     k4 * std::pow(theta,8));
+            x_d = (theta_d / r_val) * a;
+            y_d = (theta_d / r_val) * b;
+        }
+        float x = static_cast<float>(fx * x_d + cx);
+        float y = static_cast<float>(fy * y_d + cy);
+
+        int ix = static_cast<int>(std::round(x));
+        int iy = static_cast<int>(std::round(y));
+
+        bool in = 0 <= ix && ix < img_cv.cols && 0 <= iy && iy < img_cv.rows;
+
+        double azimuth = -360 * pt.curvature / 100 + 360;    // 0-100ms => 360-0deg
+        bool fov_in = fov[0] <= azimuth && azimuth <= fov[1];
+
+        if (in && fov_in)
+        {
+            cv::Vec3b color = img_cv.at<cv::Vec3b>(iy, ix);
+            pt.r = color[2];
+            pt.g = color[1];
+            pt.b = color[0];
+            pcd_color.push_back(pt);
+            mapped++;
+        }
+    }
+}
+
+// Explicit template instantiations
+template void ColormapNode::cameraCallback<sensor_msgs::msg::CompressedImage>(sensor_msgs::msg::CompressedImage::SharedPtr);
+template void ColormapNode::cameraCallback<sensor_msgs::msg::Image>(sensor_msgs::msg::Image::SharedPtr);
+template ColormapNode::FrameGroup<sensor_msgs::msg::CompressedImage> ColormapNode::sync<sensor_msgs::msg::CompressedImage>();
+template ColormapNode::FrameGroup<sensor_msgs::msg::Image> ColormapNode::sync<sensor_msgs::msg::Image>();
+template void ColormapNode::colorizePointCloud<sensor_msgs::msg::CompressedImage>(FrameGroup<sensor_msgs::msg::CompressedImage> &);
+template void ColormapNode::colorizePointCloud<sensor_msgs::msg::Image>(FrameGroup<sensor_msgs::msg::Image> &);
+template void ColormapNode::worker<sensor_msgs::msg::CompressedImage>();
+template void ColormapNode::worker<sensor_msgs::msg::Image>();
+template void ColormapNode::mapPinHole<sensor_msgs::msg::CompressedImage>(PointCloudXYZRGBN &, sensor_msgs::msg::CompressedImage &, PointCloudXYZRGBN &);
+template void ColormapNode::mapPinHole<sensor_msgs::msg::Image>(PointCloudXYZRGBN &, sensor_msgs::msg::Image &, PointCloudXYZRGBN &);
+
 void ColormapNode::initParameters()
 {
-    this->declare_parameter<bool>("publish.color_en", false);
-    this->declare_parameter<bool>("publish.color_compressed", false);
+    this->declare_parameter<bool>("camera.compressed_image", false);
     this->declare_parameter<string>("camera.topic", "/camera");
     this->declare_parameter<string>("camera.pcd_topic", "/colored_cloud");
     this->declare_parameter<double>("camera.z_filter", 0.0);
     this->declare_parameter<double>("camera.time_offset", 0.0);
+    this->declare_parameter<int>("camera.frame_rate", 30);
     auto declare_intrinsics_extrinsics = [&](string frame_id) {
         this->declare_parameter<string>(frame_id + ".frame_id", frame_id);
         this->declare_parameter<vector<double>>(frame_id + ".intrinsics", vector<double>());
@@ -60,12 +340,12 @@ void ColormapNode::initParameters()
     declare_intrinsics_extrinsics("camera.right");
 
     bool success = true;
-    success &= this->get_parameter_or("publish.color_en", params.publish_color_en, false);
-    success &= this->get_parameter_or("publish.color_compressed", params.color_compressed, false);
+    success &= this->get_parameter_or("camera.compressed_image", params.compressed_image, false);
     success &= this->get_parameter("camera.topic", params.camera_topic);
     success &= this->get_parameter("camera.pcd_topic", params.pcd_topic);
     success &= this->get_parameter("camera.z_filter", params.z_filter);
     success &= this->get_parameter("camera.time_offset", params.time_offset);
+    success &= this->get_parameter("camera.frame_rate", params.frame_rate);
     auto get_intrinsics_extrinsics = [&](string frame_id) {
         vector<double> T, R, fov, intrinsics, distortion;
         bool front;
@@ -108,6 +388,7 @@ void ColormapNode::printParameters()
     logger->info("Camera topic: {}", params.camera_topic);
     logger->info("PCD topic: {}", params.pcd_topic);
     logger->info("Time offset: {}", params.time_offset);
+    logger->info("Frame rate: {}", params.frame_rate);
     for (const auto& [frame_id, intrinsics] : params.intrinsics) {
         logger->info("Frame ID: {}", frame_id);
         logger->info("Intrinsics: [{}]", fmt::join(intrinsics, ", "));
@@ -132,191 +413,6 @@ double ColormapNode::poly_eval(const Eigen::VectorXd &coeffs, double x) {
     return result;
 }
 
-void ColormapNode::cameraCallback(ImageMsg::SharedPtr msg)
-{
-    std::lock_guard<std::mutex> lock(mtx);
-    auto msg_time = rclcpp::Time(msg->header.stamp).seconds();
-    auto last_time = image_msg_queue.empty() ? -1e10 : rclcpp::Time(image_msg_queue.back()->header.stamp).seconds();
-    image_msg_queue.push_back(msg);
-    if (msg_time < last_time)
-    {
-        logger->warn("out of order");
-        std::sort(image_msg_queue.begin(), image_msg_queue.end(),
-                  [](auto &a, auto &b) { return rclcpp::Time(a->header.stamp) < rclcpp::Time(b->header.stamp); });
-    }
-    cv.notify_all();
-}
-
-ColormapNode::FrameGroup ColormapNode::sync()
-{
-    ColormapNode::FrameGroup g;
-
-    g.pcd = pointcloud_queue.front();
-    pointcloud_queue.pop_front();
-    double pcd_times_ms = g.pcd->header.stamp;
-    double threshold = 17.0; //17
-    double diff = 0.0;
-    while (!image_msg_queue.empty())
-    {
-        auto img_time_ms = time_ms(image_msg_queue.front());
-        diff = pcd_times_ms - img_time_ms;
-        if (abs(diff) < threshold)
-        {
-            g.imgs.push_back(image_msg_queue.front());
-            image_msg_queue.pop_front();
-        }
-        else if (diff < 0)
-        {
-            break;
-        }
-        else 
-        {
-            logger->warn("Dropping stale image");
-            image_msg_queue.pop_front();
-        }
-    }
-    if (g.imgs.size() != params.extrinsics_T_CI.size())
-    {
-        logger->warn("Incomplete frame set {}/{}", g.imgs.size(), params.extrinsics_T_CI.size());
-    }
-
-    return g;
-}
-
-ColormapNode::FrameGroup ColormapNode::sync_nocam()
-{
-    ColormapNode::FrameGroup g;
-
-    g.pcd = pointcloud_queue.front();
-    pointcloud_queue.pop_front();
-
-    return g;
-}
-
-void ColormapNode::mapPinHole(PointCloudXYZRGBN &pcd, ImageMsg &img, PointCloudXYZRGBN &pcd_color)
-{
-    auto frame_id = img.header.frame_id;
-    // print img timestamp
-
-    if (params.extrinsics_T_CI.find(frame_id) == params.extrinsics_T_CI.end())
-    {
-        logger->warn("frame {} doesn't exist", frame_id);
-        return;
-    }
-    if (params.intrinsics.find(frame_id) == params.intrinsics.end()) 
-    {
-        logger->warn("Frame {} doesn't exist or intrinsics missing", frame_id);
-        return;
-    }
-    logger->info("Map frame {}", frame_id);
-
-    auto T = params.extrinsics_T_CI[frame_id];
-    auto R = params.extrinsics_R_CI[frame_id];
-    auto fov = params.fov[frame_id];
-    auto intrinsics = params.intrinsics[frame_id];
-    auto distortion = params.distortion[frame_id];
-
-    auto fx = intrinsics[0];
-    auto fy = intrinsics[4];
-    auto cx = intrinsics[2];
-    auto cy = intrinsics[5];
-    auto k1 = distortion[0];
-    auto k2 = distortion[1];
-    auto k3 = distortion[2];
-    auto k4 = distortion[3];
-
-    // check if img is a sensor_msgs::msg::CompressedImage or sensor_msgs::msg::Image
-    cv::Mat img_cv;
-    // if(params.color_compressed)
-    // {
-    //     img_cv = cv::Mat(img.height, img.width, CV_8UC3, const_cast<uint8_t *>(img.data.data()));
-    //     if (img_cv.empty())
-    //     {
-    //         logger->warn("Failed to decode image");
-    //         return;
-    //     }
-    // }
-    // else
-    {
-        img_cv = cv::imdecode(cv::Mat(img.data), cv::IMREAD_UNCHANGED);
-        if (img_cv.empty())
-        {
-            logger->warn("Failed to decode image");
-            return;
-        }
-    }
-
-    logger->info("Decoded");
-    int mapped = 0;
-    pcd_color.clear();
-    
-    for (auto &pt : pcd.points)
-    {
-        Eigen::Vector3d pt_imu(pt.x, pt.y, pt.z);
-        Eigen::Vector3d pt_cam = R * pt_imu + T;
-
-        if(pt_cam.z() <= 0) // ros cam +z forward
-            continue;
-
-        float a = static_cast<float>(pt_cam.x() / pt_cam.z());
-        float b = static_cast<float>(pt_cam.y() / pt_cam.z());
-        float r_val = std::sqrt(a * a + b * b);
-        float x_d = 0.0f, y_d = 0.0f;
-        if(r_val < 1e-6) {
-            x_d = 0.0f;
-            y_d = 0.0f;
-        } else {
-            float theta = std::atan(r_val);
-            float theta_d = theta * (1 + k1 * std::pow(theta,2) +
-                                        k2 * std::pow(theta,4) +
-                                        k3 * std::pow(theta,6) +
-                                        k4 * std::pow(theta,8));
-            x_d = (theta_d / r_val) * a;
-            y_d = (theta_d / r_val) * b;
-        }
-        float x = static_cast<float>(fx * x_d * y_d + cx);
-        float y = static_cast<float>(fy * y_d + cy);
-
-        int ix = static_cast<int>(std::round(x));
-        int iy = static_cast<int>(std::round(y));
-
-        cv::Vec3b color;
-
-        bool in = 0 <= ix < img_cv.cols && 0 <= iy < img_cv.rows;
-
-        double azimuth = -360 * pt.curvature / 100 + 360;    // 0-100ms => 360-0deg
-        
-        bool fov_in = fov[0] <= azimuth && azimuth <= fov[1];
-
-        if (in && fov_in)
-        {
-            cv::Vec3b color = img_cv.at<cv::Vec3b>(iy, ix);
-            pt.r = color[2];
-            pt.g = color[1];
-            pt.b = color[0];
-            pcd_color.push_back(pt);
-            mapped++;
-        }
-    }
-    logger->info("Mapped {} points", mapped); // mapping time is minimal compared to decoding time
-}
-
-void ColormapNode::putColor(PointCloudXYZRGBN &pcd, PointCloudXYZRGBN &pcd_color)
-{
-    int mapped = 0;
-    pcd_color.clear();
-    cv::Vec3b color(255,255,255);
-    for (auto &pt : pcd.points)
-    {
-        pt.r = color[0];
-        pt.g = color[1];
-        pt.b = color[2];
-        pcd_color.push_back(pt);
-        mapped++;
-    }
-    logger->info("Mapped {} points", mapped); // mapping time is minimal compared to decoding time
-}
-
 void filterPointCloud(PointCloudXYZRGBN::Ptr cloud, float z_limit)
 {
     pcl::PassThrough<PointCloudXYZRGBN::PointType> pass;
@@ -326,108 +422,6 @@ void filterPointCloud(PointCloudXYZRGBN::Ptr cloud, float z_limit)
     pass.filter(*cloud);
 }
 
-void ColormapNode::colorizePointCloud(ColormapNode::FrameGroup &g)
-{
-    if (g.imgs.empty())
-    {
-        std::cout << "No image available" << std::endl;
-        return;
-    }
-
-    PointCloudXYZRGBN::Ptr pcd_color(new PointCloudXYZRGBN);
-    PointCloudXYZRGBN sub_pcd;
-
-    auto pos = g.pcd->sensor_origin_.head<3>();
-    auto orient = g.pcd->sensor_orientation_;
-    for (auto &img : g.imgs)
-    {
-        mapPinHole(*(g.pcd), *img, sub_pcd);
-        *pcd_color += sub_pcd;
-
-        std::string frame_id = img->header.frame_id;
-        std::string cam_timestamp_save = std::to_string(img->header.stamp.sec) + std::to_string(img->header.stamp.nanosec) + "\n";
-        auto T = params.extrinsics_T_CI[frame_id];
-        auto R = params.extrinsics_R_CI[frame_id];  
-        Eigen::Vector3d cam_pos = R * pos.cast<double>() + T.cast<double>();
-        Eigen::Quaterniond rot_quat(R);
-        Eigen::Quaterniond cam_orient = rot_quat * orient.cast<double>();
-        std::string cam_pos_save = std::to_string(cam_pos.x()) + " " + std::to_string(cam_pos.y()) + " " + std::to_string(cam_pos.z()) + "\n";
-        std::string cam_orient_save = std::to_string(cam_orient.x()) + " " + std::to_string(cam_orient.y()) + " " + std::to_string(cam_orient.z()) + " " + std::to_string(cam_orient.w()) + "\n";
-    
-        cam_path_output += frame_id + "\n" + cam_timestamp_save + cam_pos_save + cam_orient_save + "\n";
-    }
-
-    pcl::transformPointCloud(*pcd_color, *pcd_color, pos, orient);
-    if (params.z_filter > 0)
-    {
-        filterPointCloud(pcd_color, params.z_filter);
-    }
-
-    global_pcd += *pcd_color;
-
-    PointCloud2Msg pcd_msg;
-    pcl::toROSMsg(*pcd_color, pcd_msg);
-    pcd_msg.header.stamp = rclcpp::Time(g.pcd->header.stamp * 1e6); // ms to ns
-    pcd_msg.header.frame_id = "camera_init";
-    color_publisher->publish(pcd_msg);
-}
-
-void ColormapNode::colorizePointCloud_nocam(ColormapNode::FrameGroup &g)
-{
-    PointCloudXYZRGBN::Ptr pcd_color(new PointCloudXYZRGBN);
-    PointCloudXYZRGBN sub_pcd;
-
-    auto pos = g.pcd->sensor_origin_.head<3>();
-    auto orient = g.pcd->sensor_orientation_;
-    pcl::transformPointCloud(*pcd_color, *pcd_color, pos, orient);
-    if (params.z_filter > 0)
-    {
-        filterPointCloud(pcd_color, params.z_filter);
-    }
-
-    global_pcd += *pcd_color;
-
-    PointCloud2Msg pcd_msg;
-    pcl::toROSMsg(*pcd_color, pcd_msg);
-    pcd_msg.header.stamp = rclcpp::Time(g.pcd->header.stamp * 1e6); // ms to ns
-    pcd_msg.header.frame_id = "camera_init";
-    color_publisher->publish(pcd_msg);
-}
-
-void ColormapNode::worker()
-{
-    while (running)
-    {
-        ColormapNode::FrameGroup g;
-        {
-            std::unique_lock<std::mutex> lock(mtx);
-            cv.wait(lock, [&] {
-                auto buffer_ready = !pointcloud_queue.empty() && image_msg_queue.size() > 20;
-                return !running || buffer_ready;
-            });
-            g = sync();
-        }
-        colorizePointCloud(g);
-    }
-}
-
-void ColormapNode::worker_nocam()
-{
-    while (running)
-    {
-        ColormapNode::FrameGroup g;
-        {
-            std::unique_lock<std::mutex> lock(mtx);
-            cv.wait(lock, [&] {
-                auto buffer_ready = !pointcloud_queue.empty();
-                return !running || buffer_ready;
-            });
-
-            g = sync_nocam();
-        }
-        colorizePointCloud_nocam(g);
-    }
-}
 void ColormapNode::mapSaveCallback(const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
                                    std::shared_ptr<std_srvs::srv::Trigger::Response> response)
 {
@@ -441,20 +435,6 @@ void ColormapNode::mapSaveCallback(const std::shared_ptr<std_srvs::srv::Trigger:
         std::cout << "PLY 파일 저장 성공" << std::endl;
     }
 
-    std::ofstream outfile("cam_pos_orient.txt");
-    if(outfile.is_open())
-    {
-        outfile << cam_path_output;
-        outfile.close();
-    }
-    else
-    {
-        std::cout << "Error: cam_pos_orient.txt 파일 저장 실패" << std::endl;
-        response->success = false;
-        response->message = "Cam Pos Orient File Save Fail";
-        return;
-    }
-
     response->success = true;
     response->message = "PCL File Save Success";
     return;
@@ -463,33 +443,29 @@ void ColormapNode::mapSaveCallback(const std::shared_ptr<std_srvs::srv::Trigger:
 ColormapNode::ColormapNode(const rclcpp::NodeOptions &options) : Node("colormap_node")
 {
     logger->flush_on(spdlog::level::info);
-    initParameters();
-    printParameters();
-
-
-    auto qos = rclcpp::SensorDataQoS().reliable();
-
-    color_publisher = this->create_publisher<PointCloud2Msg>(params.pcd_topic, qos);
-    map_save_service = this->create_service<std_srvs::srv::Trigger>(
-        "colormap_save", std::bind(&ColormapNode::mapSaveCallback, this, std::placeholders::_1, std::placeholders::_2));
-
-    if (params.publish_color_en)
+    if(isEnabled())
     {
-        image_subscriber = this->create_subscription<ImageMsg>(
-            params.camera_topic, qos, std::bind(&ColormapNode::cameraCallback, this, std::placeholders::_1));
-    }
+        initParameters();
+        printParameters();
+        
+        auto qos = rclcpp::QoS(10).keep_all().reliable();
 
-    running = true;
-    if(params.publish_color_en)
-    {
-        colorize_thread = new std::thread(&ColormapNode::worker, this);
+        color_publisher = this->create_publisher<sensor_msgs::msg::PointCloud2>(params.pcd_topic, qos);
+        map_save_service = this->create_service<std_srvs::srv::Trigger>(
+            "colormap_save", std::bind(&ColormapNode::mapSaveCallback, this, std::placeholders::_1, std::placeholders::_2));
+
+        if (params.compressed_image) {
+            compressed_image_subscriber = this->create_subscription<sensor_msgs::msg::CompressedImage>(
+                params.camera_topic, qos, std::bind(&ColormapNode::cameraCallback<sensor_msgs::msg::CompressedImage>, this, std::placeholders::_1));
+            running = true;
+            colorize_thread = new std::thread(&ColormapNode::worker<sensor_msgs::msg::CompressedImage>, this);
+        } else {
+            image_subscriber = this->create_subscription<sensor_msgs::msg::Image>(
+                params.camera_topic, qos, std::bind(&ColormapNode::cameraCallback<sensor_msgs::msg::Image>, this, std::placeholders::_1));
+            running = true;
+            colorize_thread = new std::thread(&ColormapNode::worker<sensor_msgs::msg::Image>, this);
+        }
     }
-    else
-    {
-        colorize_thread = new std::thread(&ColormapNode::worker_nocam, this);
-    }
-    
-    initialized = true;
 }
 
 ColormapNode::~ColormapNode()

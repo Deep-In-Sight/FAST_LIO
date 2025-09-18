@@ -153,6 +153,7 @@ vect3 pos_lid;
 
 nav_msgs::msg::Path path;
 nav_msgs::msg::Odometry odomAftMapped;
+nav_msgs::msg::Odometry pre_odomAftMapped;
 geometry_msgs::msg::Quaternion geoQuat;
 geometry_msgs::msg::PoseStamped msg_body_pose;
 
@@ -640,12 +641,13 @@ void publish_frame_body(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::Shared
     pubLaserCloudFull_body->publish(laserCloudmsg);
     publish_count -= PUBFRAME_PERIOD;
 
-    laserCloudIMUBody->header.stamp = (uint64_t)(lidar_end_time * 1e3);
+    laserCloudIMUBody->header.stamp = (uint64_t)(lidar_end_time * 1e9);
     laserCloudIMUBody->sensor_origin_.head<3>() = state_point.pos.cast<float>();
     laserCloudIMUBody->sensor_orientation_ = state_point.rot.cast<float>();
 
     auto colorNode = ColormapNode::getInstance();
     colorNode->queuePointCloud(laserCloudIMUBody);
+    colorNode->queueOdometry(odomAftMapped);
 }
 
 void publish_effect_world(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudEffect)
@@ -681,7 +683,8 @@ void publish_map(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub
     sensor_msgs::msg::PointCloud2 laserCloudmsg;
     pcl::toROSMsg(*pcl_wait_pub, laserCloudmsg);
     // laserCloudmsg.header.stamp = ros::Time().fromSec(lidar_end_time);
-    laserCloudmsg.header.stamp = get_ros_time(lidar_end_time);
+    rclcpp::Time stamp_test= get_ros_time(lidar_end_time);
+    laserCloudmsg.header.stamp = stamp_test;
     laserCloudmsg.header.frame_id = "camera_init";
     pubLaserCloudMap->publish(laserCloudmsg);
 
@@ -1023,13 +1026,8 @@ LaserMappingNode::LaserMappingNode(const rclcpp::NodeOptions& options) : Node("l
         cout << "~~~~"<<ROOT_DIR<<" doesn't exist" << endl;
 
 
-#ifdef ISAAC_SIM
     auto qos = rclcpp::QoS(10).keep_all().reliable();
     sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic, qos, imu_cbk);
-#else
-    auto qos = rclcpp::SensorDataQoS();
-    sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic,  rclcpp::QoS(10).keep_all().best_effort(),  imu_cbk);
-#endif
     /*** ROS subscribe initialization ***/
 #ifdef USE_LIVOX
     if (p_pre->lidar_type == AVIA)

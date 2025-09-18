@@ -3,8 +3,8 @@
         feature_extract_enable: false
         point_filter_num: 1 # 15
         max_iteration: 3
-        filter_size_surf: 0.09 # 0.1
-        filter_size_map: 0.09 # 0.15
+        filter_size_surf: 0.1
+        filter_size_map: 0.15
         cube_side_length: 1000.0
         runtime_pos_log_enable: false
         map_file_path: "./test.pcd"
@@ -22,7 +22,7 @@
             lidar_type: 3                # 1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for ouster LiDAR, 
             scan_line: 32
             timestamp_unit: 3                 # 0-second, 1-milisecond, 2-microsecond, 3-nanosecond.
-            blind: 1.5 # 1.0
+            blind: 1.2 # 1.0
 
         mapping:
             # acc_cov: 0.1 # Isaac sim data
@@ -46,6 +46,9 @@
                             0.0,  0.0 , 1.0 ]
         
         camera:
+            enable : true
+            compressed_image: true       # publish the compressed color image
+            frame_rate : 30
             topic: "/camera/image/compressed" # all cameras publish on the same topics, distinguish by frame_id
             # topic : "/ecam_left/camera/image_raw"
             pcd_topic: "/colored_cloud"
@@ -103,8 +106,6 @@
 
         publish:
             path_en:  true
-            color_en: false               # publish the color point cloud, must have scan_bodyframe_pub_en = true
-            color_compressed: true       # publish the compressed color image
             scan_publish_en:  true      # publish the point cloud scans in global frame
             dense_publish_en: true      # publish full lidar scan or down sampled scan
             scan_bodyframe_pub_en: true  # true: output the point cloud scans in IMU-body-frame

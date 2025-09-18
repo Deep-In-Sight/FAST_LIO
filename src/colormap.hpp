@@ -10,19 +10,12 @@
 #include <sensor_msgs/msg/compressed_image.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <nav_msgs/msg/odometry.hpp>
 #include <std_srvs/srv/trigger.hpp>
 #include <thread>
 
 typedef pcl::PointXYZRGBNormal PointRGBType;
 typedef pcl::PointCloud<PointRGBType> PointCloudXYZRGBN;
-// #ifndef ISAAC_SIM
-// typedef sensor_msgs::msg::Image ImageMsg;
-// #else
-// typedef sensor_msgs::msg::CompressedImage ImageMsg;
-// #endif
-typedef sensor_msgs::msg::CompressedImage ImageMsg;
-
-typedef sensor_msgs::msg::PointCloud2 PointCloud2Msg;
 
 class ColormapNode : public rclcpp::Node
 {
@@ -31,12 +24,12 @@ class ColormapNode : public rclcpp::Node
 
     struct ColormapParams
     {
-        bool publish_color_en;
-        bool color_compressed;
+        bool compressed_image;
         std::string camera_topic;
         std::string pcd_topic;
         double z_filter;
         double time_offset;
+        int frame_rate;
         std::map<std::string, std::vector<double>> intrinsics;
         std::map<std::string, std::vector<double>> distortion;
         std::map<std::string, Eigen::Vector3d> extrinsics_T_CI; // from imu to camera
@@ -44,9 +37,10 @@ class ColormapNode : public rclcpp::Node
         std::map<std::string, Eigen::Vector2d> fov; // horizontal start and end in degs
     };
 
+    template<typename ImageType>
     struct FrameGroup
     {
-        std::vector<ImageMsg::SharedPtr> imgs;
+        std::vector<typename ImageType::SharedPtr> imgs;
         PointCloudXYZRGBN::Ptr pcd;
     };
 
@@ -54,28 +48,33 @@ class ColormapNode : public rclcpp::Node
     ColormapNode(const ColormapNode &) = delete;
     ColormapNode &operator=(const ColormapNode &) = delete;
 
-    bool isInitialized()
-    {
-        return initialized;
-    }
     void queuePointCloud(PointCloudXYZRGBN::Ptr &msg);
+    void queueOdometry(nav_msgs::msg::Odometry &odom);
     ~ColormapNode();
 
   private:
+    bool isEnabled();
     void initParameters();
     void printParameters();
     double poly_eval(const Eigen::VectorXd &coeffs, double x);
-    void cameraCallback(ImageMsg::SharedPtr msg);
+    
+    template<typename ImageType>
+    void cameraCallback(typename ImageType::SharedPtr msg);
+    
     void mapSaveCallback(const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
                          std::shared_ptr<std_srvs::srv::Trigger::Response> response);
-    FrameGroup sync();
-    FrameGroup sync_nocam();
-    void mapPinHole(PointCloudXYZRGBN &pcd, ImageMsg &img, PointCloudXYZRGBN &pcd_color);
-    void putColor(PointCloudXYZRGBN &pcd, PointCloudXYZRGBN &pcd_color);
-    void colorizePointCloud(FrameGroup &g);
-    void colorizePointCloud_nocam(FrameGroup &g);
+    
+    template<typename ImageType>
+    FrameGroup<ImageType> sync();
+    
+    template<typename ImageType>
+    void mapPinHole(PointCloudXYZRGBN &pcd, ImageType &img, PointCloudXYZRGBN &pcd_color);
+    
+    template<typename ImageType>
+    void colorizePointCloud(FrameGroup<ImageType> &g);
+    
+    template<typename ImageType>
     void worker();
-    void worker_nocam();
 
     ColormapNode(const rclcpp::NodeOptions &options = rclcpp::NodeOptions());
 
@@ -84,16 +83,16 @@ class ColormapNode : public rclcpp::Node
     ColormapParams params;
     PointCloudXYZRGBN global_pcd;
 
-    rclcpp::Subscription<ImageMsg>::SharedPtr image_subscriber;
-    rclcpp::Publisher<PointCloud2Msg>::SharedPtr color_publisher;
+    rclcpp::Subscription<sensor_msgs::msg::CompressedImage>::SharedPtr compressed_image_subscriber;
+    rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_subscriber;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr color_publisher;
     rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr map_save_service;
 
     std::deque<PointCloudXYZRGBN::Ptr> pointcloud_queue;
-    std::deque<ImageMsg::SharedPtr> image_msg_queue;
+    std::deque<sensor_msgs::msg::CompressedImage::SharedPtr> compressed_image_queue;
+    std::deque<sensor_msgs::msg::Image::SharedPtr> image_queue;
+    std::deque<nav_msgs::msg::Odometry> odom_queue;
     std::mutex mtx;
     std::condition_variable cv;
     std::thread *colorize_thread;
-
-    std::string cam_path_output;
-    bool initialized = false;
 };
