@@ -23,8 +23,6 @@
 
 /// *************Preconfiguration
 
-#define MAX_INI_COUNT (10)
-
 const bool time_list(PointType &x, PointType &y) {return (x.curvature < y.curvature);};
 
 /// *************IMU Process and undistortion
@@ -46,6 +44,9 @@ class ImuProcess
   void set_acc_cov(const V3D &scaler);
   void set_gyr_bias_cov(const V3D &b_g);
   void set_acc_bias_cov(const V3D &b_a);
+  void set_max_ini_count(int max_ini_count);
+  bool get_imu_init_success() { return !imu_need_init_ & imu_init_success_; }
+
   Eigen::Matrix<double, 12, 12> Q;
   void Process(const MeasureGroup &meas,  esekfom::esekf<state_ikfom, 12, input_ikfom> &kf_state, PointCloudXYZI::Ptr pcl_un_);
 
@@ -57,7 +58,6 @@ class ImuProcess
   V3D cov_bias_gyr;
   V3D cov_bias_acc;
   double first_lidar_time;
-
  private:
   void IMU_init(const MeasureGroup &meas, esekfom::esekf<state_ikfom, 12, input_ikfom> &kf_state, int &N);
   void UndistortPcl(const MeasureGroup &meas, esekfom::esekf<state_ikfom, 12, input_ikfom> &kf_state, PointCloudXYZI &pcl_in_out);
@@ -81,8 +81,10 @@ class ImuProcess
   double gravity_;
   double last_lidar_end_time_;
   int    init_iter_num = 1;
+  int max_ini_count;
   bool   b_first_frame_ = true;
   bool   imu_need_init_ = true;
+  bool   imu_init_success_ = false;
 };
 
 ImuProcess::ImuProcess()
@@ -100,6 +102,7 @@ ImuProcess::ImuProcess()
   Lidar_T_wrt_IMU = Zero3d;
   Lidar_R_wrt_IMU = Eye3d;
   last_imu_.reset(new sensor_msgs::msg::Imu());
+  max_ini_count = 100;
 }
 
 ImuProcess::~ImuProcess() {}
@@ -155,6 +158,11 @@ void ImuProcess::set_gyr_bias_cov(const V3D &b_g)
 void ImuProcess::set_acc_bias_cov(const V3D &b_a)
 {
   cov_bias_acc = b_a;
+}
+
+void ImuProcess::set_max_ini_count(int max_ini_count)
+{
+  this->max_ini_count = max_ini_count;
 }
 
 void ImuProcess::IMU_init(const MeasureGroup &meas, esekfom::esekf<state_ikfom, 12, input_ikfom> &kf_state, int &N)
@@ -462,20 +470,35 @@ void ImuProcess::Process(const MeasureGroup &meas,  esekfom::esekf<state_ikfom, 
     last_imu_   = meas.imu.back();
 
     state_ikfom imu_state = kf_state.get_x();
-    if (init_iter_num > MAX_INI_COUNT)
+    if (init_iter_num > max_ini_count)
     {
       cov_acc *= pow(G_m_s2 / mean_acc.norm(), 2);
       imu_need_init_ = false;
 
-      cov_acc = cov_acc_scale;
-      cov_gyr = cov_gyr_scale;
-      std::cout << "IMU Initial Done" << std::endl;
-      // ROS_INFO("IMU Initial Done: Gravity: %.4f %.4f %.4f %.4f; state.bias_g: %.4f %.4f %.4f; acc covarience: %.8f %.8f %.8f; gry covarience: %.8f %.8f %.8f",\
-      //          imu_state.grav[0], imu_state.grav[1], imu_state.grav[2], mean_acc.norm(), cov_bias_gyr[0], cov_bias_gyr[1], cov_bias_gyr[2], cov_acc[0], cov_acc[1], cov_acc[2], cov_gyr[0], cov_gyr[1], cov_gyr[2]);
-      fout_imu.open(DEBUG_FILE_DIR("imu.txt"),ios::out);
+      // mean value from Vector3d cov_acc
+      double cov_acc_mean = (cov_acc[0] + cov_acc[1] + cov_acc[2]) / 3.0;
+      double cov_gyr_mean = (cov_gyr[0] + cov_gyr[1] + cov_gyr[2]) / 3.0;
+      ofstream fout_imu_init(string(ROOT_DIR) + string("imu_init.txt"),ios::out);
+      if (cov_acc_mean < 0.02 && cov_gyr_mean < 1e-3)
+      {
+        std::cout << "IMU Initial Done" << std::endl;
+        fout_imu_init << "IMU Initial Done" << std::endl;
+        imu_init_success_ = true;
+      }
+      else
+      {
+        std::cout << "IMU Initial Failed" << std::endl;
+        fout_imu_init << "IMU Initial Failed" << std::endl;
+        imu_init_success_ = false;
+      }
+      fout_imu_init << "Gravity: " << imu_state.grav[0] << " " << imu_state.grav[1] << " " << imu_state.grav[2] << " " << mean_acc.norm() << std::endl;
+      fout_imu_init << "Acc covarience: " << cov_acc[0] << " " << cov_acc[1] << " " << cov_acc[2] << std::endl;
+      fout_imu_init << "Gry covarience: " << cov_gyr[0] << " " << cov_gyr[1] << " " << cov_gyr[2] << std::endl;
+      fout_imu_init.close();
+
     }
 
-    return;
+    // return;
   }
 
   UndistortPcl(meas, kf_state, *cur_pcl_un_);

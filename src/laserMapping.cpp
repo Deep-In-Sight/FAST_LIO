@@ -114,6 +114,7 @@ bool   point_selected_surf[100000] = {0};
 bool   lidar_pushed, flg_first_scan = true, flg_exit = false, flg_EKF_inited;
 bool   scan_pub_en = false, dense_pub_en = false, scan_body_pub_en = false;
 bool    is_first_lidar = true;
+int    max_imu_init_msg_count = 100;
 
 vector<vector<int>>  pointSearchInd_surf; 
 vector<BoxPointType> cub_needrm;
@@ -931,6 +932,7 @@ LaserMappingNode::LaserMappingNode(const rclcpp::NodeOptions& options) : Node("l
     this->declare_parameter<int>("pcd_save.interval", -1);
     this->declare_parameter<vector<double>>("mapping.extrinsic_T", vector<double>());
     this->declare_parameter<vector<double>>("mapping.extrinsic_R", vector<double>());
+    this->declare_parameter<int>("max_imu_init_msg_count", 100);
 
     this->get_parameter_or<bool>("publish.path_en", path_en, true);
     this->get_parameter_or<bool>("publish.effect_map_en", effect_pub_en, false);
@@ -972,6 +974,7 @@ LaserMappingNode::LaserMappingNode(const rclcpp::NodeOptions& options) : Node("l
     this->get_parameter_or<int>("pcd_save.interval", pcd_save_interval, -1);
     this->get_parameter_or<vector<double>>("mapping.extrinsic_T", extrinT, vector<double>());
     this->get_parameter_or<vector<double>>("mapping.extrinsic_R", extrinR, vector<double>());
+    this->get_parameter_or<int>("preprocess.max_imu_init_msg_count", max_imu_init_msg_count, 100);
 
     RCLCPP_INFO(this->get_logger(), "p_pre->lidar_type %d", p_pre->lidar_type);
 
@@ -1007,6 +1010,8 @@ LaserMappingNode::LaserMappingNode(const rclcpp::NodeOptions& options) : Node("l
 #endif
     p_imu->set_gyr_bias_cov(V3D(b_gyr_cov, b_gyr_cov, b_gyr_cov));
     p_imu->set_acc_bias_cov(V3D(b_acc_cov, b_acc_cov, b_acc_cov));
+
+    p_imu->set_max_ini_count(max_imu_init_msg_count);
 
     fill(epsi, epsi+23, 0.001);
     kf.init_dyn_share(get_f, df_dx, df_dw, h_share_model, NUM_MAX_ITERATIONS, epsi);
@@ -1056,7 +1061,7 @@ LaserMappingNode::LaserMappingNode(const rclcpp::NodeOptions& options) : Node("l
 
     map_save_srv_ = this->create_service<std_srvs::srv::Trigger>("map_save", std::bind(&LaserMappingNode::map_save_callback, this, std::placeholders::_1, std::placeholders::_2));
     odom_save_srv_ = this->create_service<std_srvs::srv::Trigger>("odom_save", std::bind(&LaserMappingNode::odom_save_callback, this, std::placeholders::_1, std::placeholders::_2));
-
+    imu_init_srv_ = this->create_service<std_srvs::srv::Trigger>("imu_init", std::bind(&LaserMappingNode::imu_init_callback, this, std::placeholders::_1, std::placeholders::_2));
 
     RCLCPP_INFO(this->get_logger(), "Node init finished.");
 }
@@ -1265,6 +1270,20 @@ void LaserMappingNode::odom_save_callback(std_srvs::srv::Trigger::Request::Const
     {
         res->success = false;
         res->message = "Odometry save disabled.";
+    }
+}
+
+void LaserMappingNode::imu_init_callback(std_srvs::srv::Trigger::Request::ConstSharedPtr req, std_srvs::srv::Trigger::Response::SharedPtr res)
+{
+    if (p_imu->get_imu_init_success()) {
+        state_point = kf.get_x();
+        res->success = true;
+        res->message = "IMU Initialization done.";
+        res->message += "Gravity: " + std::to_string(state_point.grav[0]) + " " + std::to_string(state_point.grav[1]) + " " + std::to_string(state_point.grav[2]);
+    }
+    else {
+        res->success = false;
+        res->message = "IMU Initialization failed.";
     }
 }
 

@@ -138,9 +138,9 @@ ColormapNode::FrameGroup<ImageType> ColormapNode::sync()
         }
     }
 
-    if (g.imgs.size() != params.extrinsics_T_CI.size()) {
-        logger->warn("Incomplete frame set {}/{}", g.imgs.size(), params.extrinsics_T_CI.size());
-    }
+    // if (g.imgs.size() != params.extrinsics_T_CI.size()) {
+    //     logger->warn("Incomplete frame set {}/{}", g.imgs.size(), params.extrinsics_T_CI.size());
+    // }
 
     return g;
 }
@@ -151,7 +151,6 @@ void ColormapNode::colorizePointCloud(FrameGroup<ImageType> &g)
     if (g.imgs.empty()) {
         return;
     }
-
     PointCloudXYZRGBN::Ptr pcd_color(new PointCloudXYZRGBN);
     PointCloudXYZRGBN sub_pcd;
 
@@ -210,7 +209,6 @@ template<typename ImageType>
 void ColormapNode::mapPinHole(PointCloudXYZRGBN &pcd, ImageType &img, PointCloudXYZRGBN &pcd_color)
 {
     auto frame_id = img.header.frame_id;
-    logger->info("Map frame {}", frame_id);
 
     if (params.extrinsics_T_CI.find(frame_id) == params.extrinsics_T_CI.end())
     {
