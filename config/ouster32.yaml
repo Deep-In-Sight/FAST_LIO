@@ -47,8 +47,7 @@
                             0.0,  0.0 , 1.0 ]
         
         camera:
-            enable : true
-            compressed_image: true       # publish the compressed color image
+            enable : 2 # 0 : disable camera, 1 : subscribe raw image, 2 : subscribe compressed image
             frame_rate : 30
             topic: "/camera/image/compressed" # all cameras publish on the same topics, distinguish by frame_id
             # topic : "/ecam_left/camera/image_raw"
@@ -132,6 +131,6 @@
             scan_bodyframe_pub_en: true  # true: output the point cloud scans in IMU-body-frame
 
         pcd_save:
-            pcd_save_en: true
+            pcd_save_en: false
             interval: -1                 # how many LiDAR frames saved in each pcd file; 
                                         # -1 : all frames will be saved in ONE pcd file, may lead to memory crash when having too much frames.

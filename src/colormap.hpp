@@ -53,7 +53,6 @@ class ColormapNode : public rclcpp::Node
     ~ColormapNode();
 
   private:
-    bool isEnabled();
     void initParameters();
     void printParameters();
     double poly_eval(const Eigen::VectorXd &coeffs, double x);
@@ -79,6 +78,7 @@ class ColormapNode : public rclcpp::Node
     ColormapNode(const rclcpp::NodeOptions &options = rclcpp::NodeOptions());
 
     bool running;
+    int camera_mode;
 
     ColormapParams params;
     PointCloudXYZRGBN global_pcd;

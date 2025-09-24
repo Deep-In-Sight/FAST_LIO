@@ -28,14 +28,6 @@ ColormapNode::Ptr ColormapNode::getInstance()
     return instance;
 }
 
-bool ColormapNode::isEnabled()
-{
-    this->declare_parameter<bool>("camera.enable", false);
-    bool enable;
-    this->get_parameter("camera.enable", enable);
-    return enable;
-}
-
 void ColormapNode::queuePointCloud(PointCloudXYZRGBN::Ptr &pcd)
 {
     std::lock_guard<std::mutex> lock(mtx);
@@ -319,7 +311,7 @@ template void ColormapNode::mapPinHole<sensor_msgs::msg::Image>(PointCloudXYZRGB
 
 void ColormapNode::initParameters()
 {
-    this->declare_parameter<bool>("camera.compressed_image", false);
+    this->declare_parameter<int>("camera.mode", 0);
     this->declare_parameter<string>("camera.topic", "/camera");
     this->declare_parameter<string>("camera.pcd_topic", "/colored_cloud");
     this->declare_parameter<double>("camera.z_filter", 0.0);
@@ -338,7 +330,8 @@ void ColormapNode::initParameters()
     declare_intrinsics_extrinsics("camera.right");
 
     bool success = true;
-    success &= this->get_parameter_or("camera.compressed_image", params.compressed_image, false);
+    success &= this->get_parameter("camera.mode", camera_mode);
+    params.compressed_image = (camera_mode == 2) ? true : false;
     success &= this->get_parameter("camera.topic", params.camera_topic);
     success &= this->get_parameter("camera.pcd_topic", params.pcd_topic);
     success &= this->get_parameter("camera.z_filter", params.z_filter);
@@ -441,9 +434,10 @@ void ColormapNode::mapSaveCallback(const std::shared_ptr<std_srvs::srv::Trigger:
 ColormapNode::ColormapNode(const rclcpp::NodeOptions &options) : Node("colormap_node")
 {
     logger->flush_on(spdlog::level::info);
-    if(isEnabled())
+    
+    initParameters();
+    if(camera_mode)
     {
-        initParameters();
         printParameters();
         
         auto qos = rclcpp::QoS(10).keep_all().reliable();
