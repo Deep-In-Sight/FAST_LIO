@@ -33,7 +33,7 @@ def generate_launch_description():
         description='Yaml config file path'
     )
     decalre_config_file_cmd = DeclareLaunchArgument(
-        'config_file', default_value='mid360.yaml',
+        'config_file', default_value='ouster32.yaml',
         description='Config file'
     )
     declare_rviz_cmd = DeclareLaunchArgument(
@@ -60,17 +60,6 @@ def generate_launch_description():
     #     condition=IfCondition(rviz_use)
     # )
     
-    rosbag_node = TimerAction(
-        period=2.0,
-        actions=[
-            ExecuteProcess(
-                cmd = ['ros2', 'bag', 'play', '--qos-profile-overrides-path', '/ros2_ws/qos_profile.yaml', '/shared_data/office_sim_bag'],
-                name = 'rosbag_play',
-                output = 'screen',
-                on_exit = Shutdown()
-            )
-        ]
-    )
 
     ld = LaunchDescription()
     ld.add_action(declare_use_sim_time_cmd)
@@ -81,6 +70,5 @@ def generate_launch_description():
 
     ld.add_action(fast_lio_node)
     # ld.add_action(rviz_node)
-    ld.add_action(rosbag_node)
-
+    
     return ld
