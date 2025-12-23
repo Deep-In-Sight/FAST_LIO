@@ -995,7 +995,7 @@ LaserMappingNode::LaserMappingNode(const rclcpp::NodeOptions& options) : Node("l
     else
         cout << "~~~~"<<ROOT_DIR<<" doesn't exist" << endl;
 
-    auto qos = rclcpp::QoS(10).keep_all().reliable();
+    auto qos = rclcpp::QoS(10).keep_all().best_effort();
     /*** ROS subscribe initialization ***/
 #ifdef USE_LIVOX
     if (p_pre->lidar_type == AVIA)
