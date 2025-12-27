@@ -11,6 +11,12 @@ set(CMAKE_CXX_FLAGS "-std=c++14 -O3")
 
 add_definitions(-DROOT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/\")
 
+# Optional Livox LiDAR support
+option(USE_LIVOX "Build with Livox LiDAR support" OFF)
+if(USE_LIVOX)
+  add_compile_definitions(USE_LIVOX)
+endif()
+
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fexceptions")
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -59,7 +65,9 @@ find_package(std_srvs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(pcl_ros REQUIRED)
 find_package(pcl_conversions REQUIRED)
-find_package(livox_ros_driver2 REQUIRED)
+if(USE_LIVOX)
+  find_package(livox_ros_driver2 REQUIRED)
+endif()
 find_package(rosidl_default_generators REQUIRED)
 
 set(dependencies
@@ -73,8 +81,11 @@ set(dependencies
   visualization_msgs
   pcl_ros
   pcl_conversions
-  livox_ros_driver2
 )
+
+if(USE_LIVOX)
+  list(APPEND dependencies livox_ros_driver2)
+endif()
 
 # Thirdparty libraries
 find_package(Eigen3 REQUIRED)
