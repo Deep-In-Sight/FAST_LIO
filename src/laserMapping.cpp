@@ -304,8 +304,13 @@ void lasermap_fov_segment()
     kdtree_delete_time = omp_get_wtime() - delete_begin;
 }
 
-void standard_pcl_cbk(const sensor_msgs::msg::PointCloud2::UniquePtr msg) 
+void standard_pcl_cbk(const sensor_msgs::msg::PointCloud2::UniquePtr msg)
 {
+    // Skip buffer push until IMU is stable
+    if (mapping_state != MappingState::RUNNING) {
+        return;
+    }
+
     mtx_buffer.lock();
     scan_count ++;
     double cur_time = get_time_sec(msg->header.stamp);
@@ -338,8 +343,13 @@ void standard_pcl_cbk(const sensor_msgs::msg::PointCloud2::UniquePtr msg)
 double timediff_lidar_wrt_imu = 0.0;
 bool   timediff_set_flg = false;
 #ifdef USE_LIVOX
-void livox_pcl_cbk(const livox_ros_driver2::msg::CustomMsg::UniquePtr msg) 
+void livox_pcl_cbk(const livox_ros_driver2::msg::CustomMsg::UniquePtr msg)
 {
+    // Skip buffer push until IMU is stable
+    if (mapping_state != MappingState::RUNNING) {
+        return;
+    }
+
     mtx_buffer.lock();
     double cur_time = get_time_sec(msg->header.stamp);
     double preprocess_start_time = omp_get_wtime();
@@ -456,6 +466,11 @@ void imu_cbk(const sensor_msgs::msg::Imu::UniquePtr msg_in)
 {
     // Update IMU stability monitoring
     update_imu_stability(msg_in);
+
+    // Skip buffer push until IMU is stable
+    if (mapping_state != MappingState::RUNNING) {
+        return;
+    }
 
     publish_count ++;
     // cout<<"IMU got at: "<<msg_in->header.stamp.toSec()<<endl;
