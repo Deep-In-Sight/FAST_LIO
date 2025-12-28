@@ -10,6 +10,8 @@
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <std_srvs/srv/trigger.hpp>
 #include <tf2_ros/transform_broadcaster.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
 
 class LaserMappingNode : public rclcpp::Node
 {
@@ -20,6 +22,7 @@ class LaserMappingNode : public rclcpp::Node
   private:
     void timer_callback();
     void map_publish_callback();
+    bool try_lookup_extrinsics();
 
     void map_save_callback(std_srvs::srv::Trigger::Request::ConstSharedPtr req,
                            std_srvs::srv::Trigger::Response::SharedPtr res);
@@ -41,6 +44,14 @@ class LaserMappingNode : public rclcpp::Node
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::TimerBase::SharedPtr map_pub_timer_;
     rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr map_save_srv_;
+
+    // TF2 buffer/listener for extrinsics from ROS
+    std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+    std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+    bool use_extrinsics_from_ros_ = false;
+    std::string lidar_frame_ = "os_lidar";
+    std::string imu_frame_ = "os_imu";
+    bool extrinsics_received_ = false;
 
     bool effect_pub_en = false, map_pub_en = false;
     int effect_feat_num = 0, frame_num = 0;

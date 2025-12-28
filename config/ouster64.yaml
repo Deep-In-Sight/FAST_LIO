@@ -30,6 +30,9 @@
             fov_degree:    360.0
             det_range:     150.0
             extrinsic_est_en:  false      # true: enable the online estimation of IMU-LiDAR extrinsic
+            use_extrinsics_from_ros: true # true: get extrinsics from /tf_static (e.g., Ouster driver)
+            lidar_frame: "os_lidar"       # LiDAR frame ID in the TF tree
+            imu_frame: "os_imu"           # IMU frame ID in the TF tree
             extrinsic_T: [ 0.0, 0.0, 0.0 ]
             extrinsic_R: [1., 0., 0.,
                         0., 1., 0.,

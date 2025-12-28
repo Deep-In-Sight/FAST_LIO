@@ -57,6 +57,9 @@
 #include <sensor_msgs/msg/imu.hpp>
 #include <std_srvs/srv/trigger.hpp>
 #include <tf2_ros/transform_broadcaster.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
+#include <tf2/exceptions.h>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <geometry_msgs/msg/vector3.hpp>
 #ifdef USE_LIVOX
@@ -907,6 +910,9 @@ LaserMappingNode::LaserMappingNode(const rclcpp::NodeOptions& options) : Node("l
     this->declare_parameter<bool>("feature_extract_enable", false);
     this->declare_parameter<bool>("runtime_pos_log_enable", false);
     this->declare_parameter<bool>("mapping.extrinsic_est_en", true);
+    this->declare_parameter<bool>("mapping.use_extrinsics_from_ros", false);
+    this->declare_parameter<string>("mapping.lidar_frame", "os_lidar");
+    this->declare_parameter<string>("mapping.imu_frame", "os_imu");
     this->declare_parameter<bool>("pcd_save.pcd_save_en", false);
     this->declare_parameter<int>("pcd_save.interval", -1);
     this->declare_parameter<vector<double>>("mapping.extrinsic_T", vector<double>());
@@ -943,6 +949,9 @@ LaserMappingNode::LaserMappingNode(const rclcpp::NodeOptions& options) : Node("l
     this->get_parameter_or<bool>("feature_extract_enable", p_pre->feature_enabled, false);
     this->get_parameter_or<bool>("runtime_pos_log_enable", runtime_pos_log, 0);
     this->get_parameter_or<bool>("mapping.extrinsic_est_en", extrinsic_est_en, true);
+    this->get_parameter_or<bool>("mapping.use_extrinsics_from_ros", use_extrinsics_from_ros_, false);
+    this->get_parameter_or<string>("mapping.lidar_frame", lidar_frame_, "os_lidar");
+    this->get_parameter_or<string>("mapping.imu_frame", imu_frame_, "os_imu");
     this->get_parameter_or<bool>("pcd_save.pcd_save_en", pcd_save_en, false);
     this->get_parameter_or<int>("pcd_save.interval", pcd_save_interval, -1);
     this->get_parameter_or<vector<double>>("mapping.extrinsic_T", extrinT, vector<double>());
@@ -970,9 +979,19 @@ LaserMappingNode::LaserMappingNode(const rclcpp::NodeOptions& options) : Node("l
     memset(point_selected_surf, true, sizeof(point_selected_surf));
     memset(res_last, -1000.0f, sizeof(res_last));
 
-    Lidar_T_wrt_IMU<<VEC_FROM_ARRAY(extrinT);
-    Lidar_R_wrt_IMU<<MAT_FROM_ARRAY(extrinR);
-    p_imu->set_extrinsic(Lidar_T_wrt_IMU, Lidar_R_wrt_IMU);
+    if (use_extrinsics_from_ros_) {
+        RCLCPP_INFO(this->get_logger(), "Waiting for extrinsics from TF (lidar_frame: %s, imu_frame: %s)...",
+                    lidar_frame_.c_str(), imu_frame_.c_str());
+        // Initialize TF2 buffer and listener
+        tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
+        tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+    } else {
+        Lidar_T_wrt_IMU<<VEC_FROM_ARRAY(extrinT);
+        Lidar_R_wrt_IMU<<MAT_FROM_ARRAY(extrinR);
+        p_imu->set_extrinsic(Lidar_T_wrt_IMU, Lidar_R_wrt_IMU);
+        RCLCPP_INFO(this->get_logger(), "Using extrinsics from YAML: T=[%.4f, %.4f, %.4f]",
+                    Lidar_T_wrt_IMU(0), Lidar_T_wrt_IMU(1), Lidar_T_wrt_IMU(2));
+    }
     p_imu->set_gyr_cov(V3D(gyr_cov, gyr_cov, gyr_cov));
     p_imu->set_acc_cov(V3D(acc_cov, acc_cov, acc_cov));
     p_imu->set_gyr_bias_cov(V3D(b_gyr_cov, b_gyr_cov, b_gyr_cov));
@@ -1037,6 +1056,13 @@ LaserMappingNode::~LaserMappingNode()
 
 void LaserMappingNode::timer_callback()
 {
+    // Wait for extrinsics from TF if configured
+    if (use_extrinsics_from_ros_ && !extrinsics_received_) {
+        if (!try_lookup_extrinsics()) {
+            return;  // Keep waiting for transform
+        }
+    }
+
     if(sync_packages(Measures))
     {
 #ifndef ISAAC_SIM
@@ -1213,6 +1239,55 @@ void LaserMappingNode::map_save_callback(std_srvs::srv::Trigger::Request::ConstS
     {
         res->success = false;
         res->message = "Map save disabled.";
+    }
+}
+
+bool LaserMappingNode::try_lookup_extrinsics()
+{
+    if (extrinsics_received_) {
+        return true;
+    }
+
+    try {
+        // lookupTransform(target_frame, source_frame, time)
+        // Returns transform that takes data from source_frame to target_frame
+        // We want T_lidar_imu: transform that takes points from lidar frame to imu frame
+        geometry_msgs::msg::TransformStamped tf_lidar_to_imu =
+            tf_buffer_->lookupTransform(imu_frame_, lidar_frame_, tf2::TimePointZero);
+
+        // Convert to Eigen
+        Eigen::Quaterniond q(
+            tf_lidar_to_imu.transform.rotation.w,
+            tf_lidar_to_imu.transform.rotation.x,
+            tf_lidar_to_imu.transform.rotation.y,
+            tf_lidar_to_imu.transform.rotation.z);
+
+        Lidar_R_wrt_IMU = q.toRotationMatrix();
+        Lidar_T_wrt_IMU << tf_lidar_to_imu.transform.translation.x,
+                           tf_lidar_to_imu.transform.translation.y,
+                           tf_lidar_to_imu.transform.translation.z;
+
+        p_imu->set_extrinsic(Lidar_T_wrt_IMU, Lidar_R_wrt_IMU);
+        extrinsics_received_ = true;
+
+        RCLCPP_INFO(this->get_logger(),
+            "Received extrinsics from TF (%s -> %s):",
+            lidar_frame_.c_str(), imu_frame_.c_str());
+        RCLCPP_INFO(this->get_logger(),
+            "  Translation (LiDAR w.r.t. IMU): [%.6f, %.6f, %.6f]",
+            Lidar_T_wrt_IMU(0), Lidar_T_wrt_IMU(1), Lidar_T_wrt_IMU(2));
+        RCLCPP_INFO(this->get_logger(),
+            "  Rotation (LiDAR w.r.t. IMU):\n    [%.6f, %.6f, %.6f]\n    [%.6f, %.6f, %.6f]\n    [%.6f, %.6f, %.6f]",
+            Lidar_R_wrt_IMU(0,0), Lidar_R_wrt_IMU(0,1), Lidar_R_wrt_IMU(0,2),
+            Lidar_R_wrt_IMU(1,0), Lidar_R_wrt_IMU(1,1), Lidar_R_wrt_IMU(1,2),
+            Lidar_R_wrt_IMU(2,0), Lidar_R_wrt_IMU(2,1), Lidar_R_wrt_IMU(2,2));
+
+        return true;
+
+    } catch (const tf2::TransformException& ex) {
+        // Transform not yet available, will retry
+        RCLCPP_DEBUG(this->get_logger(), "Waiting for TF: %s", ex.what());
+        return false;
     }
 }
 
