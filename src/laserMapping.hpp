@@ -1,6 +1,7 @@
 #pragma once
 #include <Eigen/Core>
 #include <Eigen/Dense>
+#include <deque>
 #include <fstream>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
@@ -8,10 +9,17 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <std_msgs/msg/string.hpp>
 #include <std_srvs/srv/trigger.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
+
+enum class MappingState {
+    IDLE,        // Initial state, no IMU received
+    STABILIZING, // Receiving IMU, waiting for stability
+    RUNNING      // Stable, mapping active
+};
 
 class LaserMappingNode : public rclcpp::Node
 {
@@ -22,6 +30,7 @@ class LaserMappingNode : public rclcpp::Node
   private:
     void timer_callback();
     void map_publish_callback();
+    void state_publish_callback();
     bool try_lookup_extrinsics();
 
     void map_save_callback(std_srvs::srv::Trigger::Request::ConstSharedPtr req,
@@ -59,6 +68,10 @@ class LaserMappingNode : public rclcpp::Node
                            aver_time_solve = 0, aver_time_const_H_time = 0;
     bool flg_EKF_converged, EKF_stop_flg = 0;
     double epsi[23] = {0.001};
+
+    // State publisher
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_mapping_state_;
+    rclcpp::TimerBase::SharedPtr state_pub_timer_;
 
     FILE *fp;
     std::ofstream fout_pre, fout_out, fout_dbg;

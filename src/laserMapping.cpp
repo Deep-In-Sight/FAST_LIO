@@ -155,6 +155,26 @@ geometry_msgs::msg::PoseStamped msg_body_pose;
 shared_ptr<Preprocess> p_pre(new Preprocess());
 shared_ptr<ImuProcess> p_imu(new ImuProcess());
 
+/*** IMU Stability Monitoring ***/
+MappingState mapping_state = MappingState::IDLE;
+
+struct ImuSample {
+    double timestamp;
+    Eigen::Vector3d accel;
+    Eigen::Vector3d gyro;
+};
+std::deque<ImuSample> imu_window;
+Eigen::Vector3d accel_sum = Eigen::Vector3d::Zero();
+Eigen::Vector3d accel_sq_sum = Eigen::Vector3d::Zero();
+Eigen::Vector3d gyro_sum = Eigen::Vector3d::Zero();
+Eigen::Vector3d gyro_sq_sum = Eigen::Vector3d::Zero();
+double stability_start_time = -1.0;
+
+constexpr double IMU_WINDOW_DURATION = 1.0;      // 1 second sliding window
+constexpr double STABILITY_DURATION = 5.0;       // 5 seconds of stability required
+constexpr double ACCEL_STD_THRESHOLD = 0.3;      // m/s^2
+constexpr double GYRO_STD_THRESHOLD = 0.05;      // rad/s
+
 inline void dump_lio_state_to_log(FILE *fp)  
 {
     V3D rot_ang(Log(state_point.rot.toRotationMatrix()));
@@ -356,10 +376,87 @@ void livox_pcl_cbk(const livox_ros_driver2::msg::CustomMsg::UniquePtr msg)
     mtx_buffer.unlock();
     sig_buffer.notify_all();
 }
-#endif 
+#endif
+
+void update_imu_stability(const sensor_msgs::msg::Imu::UniquePtr& msg)
+{
+    // Skip if already running
+    if (mapping_state == MappingState::RUNNING) {
+        return;
+    }
+
+    // Transition from IDLE to STABILIZING on first IMU sample
+    if (mapping_state == MappingState::IDLE) {
+        mapping_state = MappingState::STABILIZING;
+        std::cout << "[FAST-LIO] IMU received, entering STABILIZING state..." << std::endl;
+    }
+
+    double timestamp = get_time_sec(msg->header.stamp);
+    Eigen::Vector3d accel(msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z);
+    Eigen::Vector3d gyro(msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z);
+
+    // Add new sample to window
+    ImuSample sample{timestamp, accel, gyro};
+    imu_window.push_back(sample);
+    accel_sum += accel;
+    accel_sq_sum += accel.cwiseProduct(accel);
+    gyro_sum += gyro;
+    gyro_sq_sum += gyro.cwiseProduct(gyro);
+
+    // Remove old samples outside the 1-second window
+    while (!imu_window.empty() && (timestamp - imu_window.front().timestamp) > IMU_WINDOW_DURATION) {
+        const auto& old_sample = imu_window.front();
+        accel_sum -= old_sample.accel;
+        accel_sq_sum -= old_sample.accel.cwiseProduct(old_sample.accel);
+        gyro_sum -= old_sample.gyro;
+        gyro_sq_sum -= old_sample.gyro.cwiseProduct(old_sample.gyro);
+        imu_window.pop_front();
+    }
+
+    // Need at least a few samples for meaningful std calculation
+    if (imu_window.size() < 10) {
+        return;
+    }
+
+    // Calculate std: std^2 = E[x^2] - E[x]^2
+    double n = static_cast<double>(imu_window.size());
+    Eigen::Vector3d accel_mean = accel_sum / n;
+    Eigen::Vector3d accel_var = accel_sq_sum / n - accel_mean.cwiseProduct(accel_mean);
+    Eigen::Vector3d gyro_mean = gyro_sum / n;
+    Eigen::Vector3d gyro_var = gyro_sq_sum / n - gyro_mean.cwiseProduct(gyro_mean);
+
+    // Get max std across all axes (use sqrt of variance)
+    double accel_std_max = std::sqrt(accel_var.maxCoeff());
+    double gyro_std_max = std::sqrt(gyro_var.maxCoeff());
+
+    bool is_stable = (accel_std_max < ACCEL_STD_THRESHOLD) && (gyro_std_max < GYRO_STD_THRESHOLD);
+
+    if (is_stable) {
+        if (stability_start_time < 0) {
+            stability_start_time = timestamp;
+            printf("[FAST-LIO] IMU stable, waiting %.1f seconds... (accel_std=%.4f, gyro_std=%.4f)\n",
+                   STABILITY_DURATION, accel_std_max, gyro_std_max);
+        }
+
+        double stable_duration = timestamp - stability_start_time;
+        if (stable_duration >= STABILITY_DURATION) {
+            mapping_state = MappingState::RUNNING;
+            printf("[FAST-LIO] IMU stable for %.1f seconds, entering RUNNING state!\n", STABILITY_DURATION);
+        }
+    } else {
+        if (stability_start_time >= 0) {
+            printf("[FAST-LIO] IMU unstable, resetting stability timer (accel_std=%.4f, gyro_std=%.4f)\n",
+                   accel_std_max, gyro_std_max);
+        }
+        stability_start_time = -1.0;  // Reset stability timer
+    }
+}
 
 void imu_cbk(const sensor_msgs::msg::Imu::UniquePtr msg_in)
 {
+    // Update IMU stability monitoring
+    update_imu_stability(msg_in);
+
     publish_count ++;
     // cout<<"IMU got at: "<<msg_in->header.stamp.toSec()<<endl;
     sensor_msgs::msg::Imu::SharedPtr msg(new sensor_msgs::msg::Imu(*msg_in));
@@ -1014,7 +1111,7 @@ LaserMappingNode::LaserMappingNode(const rclcpp::NodeOptions& options) : Node("l
     else
         cout << "~~~~"<<ROOT_DIR<<" doesn't exist" << endl;
 
-    auto qos = rclcpp::QoS(10).keep_all().best_effort();
+    auto qos = rclcpp::QoS(10).keep_all().reliable();
     /*** ROS subscribe initialization ***/
 #ifdef USE_LIVOX
     if (p_pre->lidar_type == AVIA)
@@ -1033,6 +1130,7 @@ LaserMappingNode::LaserMappingNode(const rclcpp::NodeOptions& options) : Node("l
     pubLaserCloudMap_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/Laser_map", 20);
     pubOdomAftMapped_ = this->create_publisher<nav_msgs::msg::Odometry>("/Odometry", 20);
     pubPath_ = this->create_publisher<nav_msgs::msg::Path>("/path", 20);
+    pub_mapping_state_ = this->create_publisher<std_msgs::msg::String>("/mappingState", 10);
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
 
     //------------------------------------------------------------------------------------------------------
@@ -1041,6 +1139,9 @@ LaserMappingNode::LaserMappingNode(const rclcpp::NodeOptions& options) : Node("l
 
     auto map_period_ms = std::chrono::milliseconds(static_cast<int64_t>(1000.0));
     map_pub_timer_ = rclcpp::create_timer(this, this->get_clock(), map_period_ms, std::bind(&LaserMappingNode::map_publish_callback, this));
+
+    auto state_period_ms = std::chrono::milliseconds(1000);  // Publish state every 1 second
+    state_pub_timer_ = rclcpp::create_timer(this, this->get_clock(), state_period_ms, std::bind(&LaserMappingNode::state_publish_callback, this));
 
     map_save_srv_ = this->create_service<std_srvs::srv::Trigger>("map_save", std::bind(&LaserMappingNode::map_save_callback, this, std::placeholders::_1, std::placeholders::_2));
 
@@ -1056,11 +1157,16 @@ LaserMappingNode::~LaserMappingNode()
 
 void LaserMappingNode::timer_callback()
 {
-    // Wait for extrinsics from TF if configured
+    // Try to get extrinsics from TF as soon as possible (even while stabilizing)
     if (use_extrinsics_from_ros_ && !extrinsics_received_) {
         if (!try_lookup_extrinsics()) {
             return;  // Keep waiting for transform
         }
+    }
+
+    // Wait for IMU stability before starting mapping
+    if (mapping_state != MappingState::RUNNING) {
+        return;
     }
 
     if(sync_packages(Measures))
@@ -1289,6 +1395,23 @@ bool LaserMappingNode::try_lookup_extrinsics()
         RCLCPP_DEBUG(this->get_logger(), "Waiting for TF: %s", ex.what());
         return false;
     }
+}
+
+void LaserMappingNode::state_publish_callback()
+{
+    std_msgs::msg::String msg;
+    switch (mapping_state) {
+        case MappingState::IDLE:
+            msg.data = "IDLE";
+            break;
+        case MappingState::STABILIZING:
+            msg.data = "STABILIZING";
+            break;
+        case MappingState::RUNNING:
+            msg.data = "RUNNING";
+            break;
+    }
+    pub_mapping_state_->publish(msg);
 }
 
 
