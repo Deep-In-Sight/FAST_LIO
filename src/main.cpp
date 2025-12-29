@@ -1,7 +1,9 @@
 #include <colormap.hpp>
 #include <laserMapping.hpp>
 #include <libunwind.h>
+#include <csignal>
 
+#ifdef DEBUG
 std::atomic<bool> stack_trace_printed{false}; // Prevent re-entry
 void print_stack_trace()
 {
@@ -38,14 +40,17 @@ void SigHandle(int sig)
     }
     rclcpp::shutdown();
 }
+#endif // DEBUG
 
 int main(int argc, char **argv)
 {
     rclcpp::init(argc, argv);
 
+#ifdef DEBUG
     signal(SIGINT, SigHandle);
     signal(SIGSEGV, SigHandle);
     signal(SIGABRT, SigHandle);
+#endif // DEBUG
 
     auto mappingNode = std::make_shared<LaserMappingNode>();
     auto colorizeNode = ColormapNode::getInstance();
@@ -59,6 +64,6 @@ int main(int argc, char **argv)
     if (rclcpp::ok())
         rclcpp::shutdown();
 
-    saveEverything();
+    // saveEverything();
     return 0;
 }

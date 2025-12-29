@@ -2,7 +2,8 @@ cmake_minimum_required(VERSION 3.8)
 project(fast_lio)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-  add_compile_definitions(-g)
+  add_compile_definitions(DEBUG)
+  message(STATUS "DEBUG mode enabled - signal handlers enabled")
 endif()
 
 if(NOT CMAKE_BUILD_TYPE)
